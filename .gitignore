@@ -1,0 +1,55 @@
+# Environment & Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Data & Datasets
+data/
+*.csv
+*.parquet
+*.jsonl
+*.zip
+*.tar.gz
+
+# Model Weights, Checkpoints & Artifacts
+models/
+checkpoints/
+*.pt
+*.pth
+*.onnx
+*.pkl
+*.h5
+*.ckpt
+*.joblib
+
+# Logs, Databases & Experiment Tracking
+runs/
+logs/
+*.log
+wandb/
+.tensorboard/
+mlruns/
+mlartifacts/
+*.sqlite
+*.db
+
+# OS & Editor specific
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Internal Learning Documentation (do not commit)
+LEARNING_NOTES.md
