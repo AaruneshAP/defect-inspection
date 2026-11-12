@@ -348,3 +348,28 @@ def preprocess_image(image_path: str, target_size: Tuple[int, int] = (224, 224))
         raise FileNotFoundError(f"Image not found at {image_path}")
     return {"path": str(path), "target_size": target_size}
 
+
+def find_kaggle_dataset(kaggle_root: str | Path = "/kaggle/input") -> Path:
+    """
+    Locates the NEU surface defect dataset directory under Kaggle's input mount.
+
+    Inputs:
+        kaggle_root (str | Path): Root directory where Kaggle mounts attached datasets.
+
+    Outputs:
+        Path: Discovered root directory path containing NEU defect images or annotations.
+    """
+    root = Path(kaggle_root)
+    if not root.exists():
+        raise FileNotFoundError("Attach the NEU Surface Defect Database under Add Input")
+
+    candidates = list(root.rglob("*NEU*"))
+    for cand in candidates:
+        if (cand / "NEU-DET").exists():
+            return cand / "NEU-DET"
+        if (cand / "train").exists() or list(cand.rglob("*.xml")):
+            return cand
+
+    raise FileNotFoundError("Attach the NEU Surface Defect Database under Add Input")
+
+

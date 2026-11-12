@@ -54,6 +54,39 @@ python -c "from src.data import convert_dataset_to_yolo; convert_dataset_to_yolo
 
 ---
 
+## Phase 2a Results
+
+Baseline model evaluation on the validation split (**216 images**, exactly 36 images per class) using **YOLOv8s** (`imgsz=640`, `seed=42`, trained for 50 epochs on Kaggle GPU):
+
+### Overall Validation Performance
+
+| Metric | Standard Evaluation (`conf=0.001`) | Operational Threshold (`conf=0.25`) |
+| :--- | :--- | :--- |
+| **mAP@50** | **0.755** | **0.668** |
+| **mAP@50-95** | **0.430** | — |
+| **Precision** | **0.725** | **0.690** |
+| **Recall** | **0.713** | **0.733** |
+
+### Per-Class mAP@50 Breakdown (Standard Evaluation, `conf=0.001`)
+
+| Defect Class | mAP@50 | Operational Note (`conf=0.25`) |
+| :--- | :--- | :--- |
+| `scratches` | **0.952** | Top performer; distinctive longitudinal aspect ratio |
+| `patches` | **0.877** | High contrast, uniform defect geometry |
+| `pitted_surface` | **0.845** | Strong texture clustering and box overlap |
+| `inclusion` | **0.813** | Solid localization on small dark anomalies |
+| `rolled-in_scale`| **0.622** | Weak class; confused with background rolling grain |
+| `crazing` | **0.419** | Weakest class / primary bottleneck; recall drops to **0.381** at `conf=0.25` |
+
+### Key Observations & Limitations
+- **Weak Classes**: `crazing` (0.419 mAP50) and `rolled-in_scale` (0.622 mAP50) represent the primary detection bottlenecks. `crazing` features low-contrast, web-like micro-cracks that easily blend into the hot-rolled metal background; at an operational confidence threshold of `conf=0.25`, crazing recall falls to only **0.381**.
+- **Sample Size Limitation**: The validation split contains only **36 images per class** (216 images total), meaning single misclassifications carry noticeable percentage weight.
+- **Single Seed**: Results reflect a single deterministic run (`seed=42`).
+- **Confusion Matrix Note**: The Ultralytics confusion matrix is **not used for conclusions** because Ultralytics computes its confusion matrix at an arbitrary fixed confidence threshold rather than evaluating across the complete precision-recall curve.
+
+
+---
+
 ## Architecture & Directory Structure
 
 ```text
@@ -75,8 +108,8 @@ defect-inspection/
 │   └── main.py            # API service endpoints (/health, /inspect)
 ├── tests/                 # Automated test suite
 │   ├── __init__.py        # Tests package exports
-│   ├── test_pipeline.py   # Interface and schema validation tests
-│   └── test_data.py       # VOC parsing, YOLO coordinate bounds, and split tests
+│   ├── test_data.py       # VOC parsing, YOLO coordinate bounds, and split tests
+│   └── test_train.py      # Configuration, metric parsing, and training safety tests
 ├── scripts/
 │   ├── bootstrap.sh       # One-click environment provisioning script
 │   └── run_eda.py         # Headless EDA figure generation script
@@ -90,12 +123,12 @@ defect-inspection/
 ## Module Breakdown
 
 1. **`src/data.py`**
-   - **Purpose**: Ingests raw images and annotations, performs normalization/resizing, parses Pascal VOC XMLs, converts to YOLO format, and produces stratified splits.
-   - **Key Functions**: `parse_voc_xml`, `voc_to_yolo_bbox`, `scan_dataset`, `split_dataset`, `convert_dataset_to_yolo`, `load_dataset`, `preprocess_image`, `create_dataloader`.
+   - **Purpose**: Ingests raw images and annotations, performs normalization/resizing, parses Pascal VOC XMLs, converts to YOLO format, produces stratified splits, and discovers Kaggle datasets.
+   - **Key Functions**: `parse_voc_xml`, `voc_to_yolo_bbox`, `scan_dataset`, `split_dataset`, `convert_dataset_to_yolo`, `load_dataset`, `preprocess_image`, `find_kaggle_dataset`.
 
 2. **`src/train.py`**
-   - **Purpose**: Coordinates neural network training epochs, validation metrics computation, and checkpoint preservation.
-   - **Key Functions**: `train_epoch`, `evaluate`, `save_checkpoint`, `run_training`.
+   - **Purpose**: Coordinates YOLOv8s neural network training, validation metrics parsing, checkpoint preservation, and result exporting.
+   - **Key Functions**: `load_config`, `parse_training_metrics`, `evaluate`, `save_checkpoint`, `save_results`, `run_training`.
 
 3. **`src/inference.py`**
    - **Purpose**: Executes optimized model inference on unseen images to produce defect verdicts and confidence scores.
@@ -105,8 +138,8 @@ defect-inspection/
    - **Purpose**: Exposes HTTP endpoints for external inspection triggers and monitoring dashboards.
    - **Key Functions**: `health_check`, `inspect_image`, `create_app`.
 
-5. **`tests/test_data.py` & `tests/test_pipeline.py`**
-   - **Purpose**: Validates coordinate clamping within $[0.0, 1.0]$, split sizes, disjoint partitions, and module interface contracts.
+5. **`tests/test_data.py` & `tests/test_train.py`**
+   - **Purpose**: Validates coordinate clamping within $[0.0, 1.0]$, split sizes, disjoint partitions, configuration validation, metric extraction, and evaluation split protection.
 
 ---
 
@@ -147,6 +180,7 @@ python -m pytest tests/
 ## Development Roadmap
 
 - [x] **Phase 1**: Project scaffolding, interface definitions, Pascal VOC to YOLO conversion, stratified splitting, and EDA.
-- [ ] **Phase 2**: Baseline model development, loss selection, and training loop implementation.
-- [ ] **Phase 3**: Metric evaluation, threshold calibration, and confusion matrix analysis.
-- [ ] **Phase 4**: Real-time REST API serving, batch inference CLI, and integration testing.
+- [x] **Phase 2a**: YOLOv8s baseline model, Kaggle cloud training workflow, evaluation on val split, and metrics baseline.
+- [ ] **Phase 2b**: Targeted augmentations (CLAHE, mosaic, scale variation) to resolve crazing bottleneck.
+- [ ] **Phase 3**: Inference engine, per-class confidence threshold calibration, and factory API.
+- [ ] **Phase 4**: Production serving, final evaluation on reserved test split, and documentation.

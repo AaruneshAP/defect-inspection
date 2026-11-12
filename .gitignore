@@ -18,6 +18,7 @@ htmlcov/
 # Data & Datasets
 data/
 *.csv
+!reports/**/*.csv
 *.parquet
 *.jsonl
 *.zip
@@ -44,6 +45,7 @@ mlruns/
 mlartifacts/
 *.sqlite
 *.db
+reports/phase2a/raw/
 
 # OS & Editor specific
 .DS_Store
