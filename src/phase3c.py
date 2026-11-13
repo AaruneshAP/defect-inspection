@@ -5,6 +5,7 @@ Sub-commands (all read cached detections; only `test` reads the test cache):
           reports/phase3/preregistration.md + frozen.json. Never reads test.
   val     out-of-fold matched-budget comparison + sensitivity grid + figures (val only).
   test    apply the frozen thresholds to the test detections ONCE (refuses to re-run).
+  match-iou  EXPLORATORY (Phase 4b, val only): matched flat vs flat 0.25 at other matching IoUs.
 """
 
 import argparse
@@ -30,6 +31,7 @@ RATIOS = (2, 3, 5, 10, 20, 50)
 REVIEW_COSTS = (0.1, 0.3, 0.6, 1.0)
 PRIMARY = {"a": 0.9, "budget": 3}
 OUT_DIR = Path("reports/phase3")
+MATCH_IOU = 0.5                           # IoU at which a detection counts as a true positive (frozen setting)
 
 
 # ---- flat (alerts only, one threshold for every class) ---------------------------------------
@@ -356,11 +358,13 @@ def plot_heatmap(sens: pd.DataFrame, path) -> None:
 
 # ---- commands --------------------------------------------------------------------------------
 
-def _load(cache: str, cfg_path: str):
+def _load(cache: str, cfg_path: str, match_iou: float = MATCH_IOU):
+    """Load cached detections and match them to GT at `match_iou` (default 0.5: the frozen Phase 3 setting)."""
     df = pd.read_parquet(cache)
     cfg = load_cost_config(cfg_path)
     names = list(cfg["class_weights"])
-    preds, gts = match_detections(df[df.kind == "pred"].reset_index(drop=True), df[df.kind == "gt"].reset_index(drop=True))
+    preds, gts = match_detections(df[df.kind == "pred"].reset_index(drop=True), df[df.kind == "gt"].reset_index(drop=True),
+                                  iou_thr=match_iou)
     return preds, gts, cfg, names
 
 
@@ -466,21 +470,74 @@ def cmd_test(a) -> None:
         plot_savings(pd.read_csv(vt), sv, out / "savings_ci.png")
 
 
+def match_iou_sensitivity(cache: str, cfg_path: str, ious: Sequence[float], budget: float = 3, k: int = 5,
+                          seed: int = 0, n_boot: int = 10000) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """EXPLORATORY, val only. For each matching IoU: out-of-fold matched flat baseline vs flat 0.25 (cost, recall,
+    alerts/image with image-bootstrap CIs; saving of matched flat vs flat 0.25), and the flat thresholds
+    (matched-budget and unconstrained cost-optimal) tuned on all val images. Costs at different matching IoUs are
+    on different scales (a looser match turns false alarms and misses into hits), so compare within an IoU."""
+    rows, thr_rows = [], []
+    for m in ious:
+        preds, gts, cfg, names = _load(cache, cfg_path, m)
+        n_img = len(set(preds.image) | set(gts.image))
+        oof, tuned = cross_validate_matched(preds, gts, cfg, names, budgets=(budget,), accs=(), k=k, seed=seed)
+        sav = bootstrap_saving(oof[("flat0.25",)].cost.to_numpy(), oof[("flat", budget)].cost.to_numpy(), n_boot, seed)
+        for label, key in (("matched flat", ("flat", budget)), ("flat 0.25", ("flat0.25",))):
+            bm = bootstrap_metrics(oof[key], n_boot, seed)
+            rows.append({"match_iou": m, "policy": label, "cost": bm["cost"][0], "cost_ci": _ci(bm["cost"], "{:.1f}"),
+                         "recall": bm["recall"][0], "recall_ci": _ci(bm["recall"], "{:.3f}"),
+                         "alerts_per_image": bm["alerts_per_image"][0],
+                         "alerts_ci": _ci(bm["alerts_per_image"], "{:.2f}"),
+                         "saving_vs_flat025": sav["saving"] if label == "matched flat" else 0.0,
+                         "saving_ci": f"[{sav['saving_lo']:.1f}, {sav['saving_hi']:.1f}]" if label == "matched flat" else "",
+                         "saving_pct": sav["saving_pct"] if label == "matched flat" else 0.0,
+                         "exploratory": True})
+        cur = flat_curve(preds, gts, cfg, names, n_img)
+        free = cur.sort_values(["cost", "t"], ascending=[True, False]).iloc[0]
+        thr_rows.append({"match_iou": m, "budget": budget,
+                         "matched_flat_threshold_full_val": best_flat_threshold(preds, gts, cfg, names, n_img, budget),
+                         "matched_flat_threshold_per_fold": " ".join(f"{t:.3f}" for t in tuned[("flat", budget)]),
+                         "unconstrained_optimal_threshold": float(free.t),
+                         "unconstrained_alerts_per_image": float(free.alerts_per_image),
+                         "n_tp_detections": int(preds.tp.sum()), "n_gt_matched": int(gts.match_conf.notna().sum()),
+                         "n_gt": len(gts), "exploratory": True})
+    return pd.DataFrame(rows), pd.DataFrame(thr_rows)
+
+
+def cmd_match_iou(a) -> None:
+    out = Path(a.out)
+    if out.resolve() == OUT_DIR.resolve():
+        sys.exit("match-iou is exploratory: refusing to write into the frozen Phase 3 report directory; pass --out")
+    if "test" in Path(a.val_cache).name.lower():
+        sys.exit("match-iou is val only; the test split is spent")
+    out.mkdir(parents=True, exist_ok=True)
+    tab, thr = match_iou_sensitivity(a.val_cache, a.config, a.match_ious, 3, a.folds, a.seed, a.n_boot)
+    tab.to_csv(out / "match_iou_sensitivity.csv", index=False)
+    thr.to_csv(out / "match_iou_thresholds.csv", index=False)
+    pd.set_option("display.width", 250, "display.max_columns", 40, "display.max_colwidth", 40)
+    print("EXPLORATORY, val only (216 images): matching-IoU sensitivity, out-of-fold, matched-flat budget <= 3 alerts/image")
+    print(tab.drop(columns=["exploratory"]).round(3).to_string(index=False))
+    print("\nFlat thresholds (tuned on all val images; per-fold = the 5 CV training folds):")
+    print(thr.drop(columns=["exploratory"]).round(3).to_string(index=False))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("cmd", choices=["freeze", "val", "test"])
+    ap.add_argument("cmd", choices=["freeze", "val", "test", "match-iou"])
+    ap.add_argument("--match-ious", type=float, nargs="+", default=[0.5, 0.3], help="match-iou command only")
     ap.add_argument("--val-cache", default="data/cache/val_detections.parquet")
     ap.add_argument("--test-cache", default="data/cache/test_detections.parquet")
     ap.add_argument("--config", default="configs/cost.yaml")
     ap.add_argument("--model", default="models/best.pt")
-    ap.add_argument("--out", default=str(OUT_DIR))
+    ap.add_argument("--out", default=None, help="default reports/phase3 (reports/phase4 for match-iou)")
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--n-boot", type=int, default=10000)
     ap.add_argument("--n-boot-sens", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
-    {"freeze": cmd_freeze, "val": cmd_val, "test": cmd_test}[a.cmd](a)
+    a.out = a.out or ("reports/phase4" if a.cmd == "match-iou" else str(OUT_DIR))
+    {"freeze": cmd_freeze, "val": cmd_val, "test": cmd_test, "match-iou": cmd_match_iou}[a.cmd](a)
 
 
 if __name__ == "__main__":

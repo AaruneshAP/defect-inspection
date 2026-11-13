@@ -178,8 +178,7 @@ Prior to running on the test set (`reports/phase3/preregistration.md`), we pre-r
 ### Sensitivity Summary
 
 A 24-condition grid sweep across miss-to-false-alarm cost ratios (2, 3, 5, 10, 20, 50) and review costs (0.1, 0.3, 0.6, 1.0) on validation revealed:
-- **Narrow Viability Window**: Review bands show statistically significant cost savings **only when review is very cheap ($0.1$)** and the miss penalty ratio is modest ($\le 10$). For example, at ratio 2 and review cost 0.1, savings reach **23.6%** (95% CI `[18.0%, 29.4%]`).
-- **High Penalty Ineffectiveness**: At higher miss-to-false-alarm ratios ($\ge 20$) or realistic review costs ($\ge 0.6$), the 95% CI crosses zero across all conditions. When missed flaws are costly, the optimal policy simply alerts directly rather than routing ambiguous items to review.
+Review bands help significantly only when review cost is ≤ 0.3 with a miss-to-false-alarm ratio ≤ 5, or review cost 0.1 at ratio 10; at ratios ≥ 20 or review cost ≥ 0.6 the savings are not distinguishable from zero.
 
 ### Methodological Limitations
 
@@ -187,6 +186,41 @@ A 24-condition grid sweep across miss-to-false-alarm cost ratios (2, 3, 5, 10, 2
 2. **Absence of Defect-Free Images**: Every image in the NEU-DET database contains at least one defect. False alarm rates on pristine, flaw-free steel sheets cannot be measured on this dataset.
 3. **Prior Validation Split Exposure**: The validation set was utilized in Phase 2 for baseline verification and experimental comparison prior to Phase 3 threshold tuning.
 4. **Single Test Evaluation**: The test set (360 images) was strictly held out and evaluated exactly once using frozen pre-registered thresholds without retuning.
+
+---
+
+## Phase 4: Error Analysis and Robustness
+
+Phase 4 diagnoses the primary failure modes on the validation split (e0 baseline, single global confidence threshold 0.127) through detailed error categorisation, IoU sensitivity sweeps, and synthetic perturbation stress tests.
+
+### 1. Defect Error Analysis (Val Split, Threshold 0.127)
+
+- **Crazing Bottleneck & Bounding Box Ambiguity**:
+  - Evaluation of the 84 ground truth crazing boxes on validation: **43 matched (TP)**, **37 poorly localized** (best same-class IoU between 0.15 and 0.50, median 0.34), **4 missed** (no kept detection with IoU > 0.1), and **0 wrong-class** confusions.
+  - Across IoU evaluation thresholds, crazing AP drops steeply: **AP30 is 0.688**, **AP50 is 0.425**, and **AP75 collapses to 0.04** (0.037).
+  - Ground truth crazing boxes are large (median area fraction 0.20) and frequently overlap sibling annotations in the same image (33.3% overlap rate). This behavior is **consistent with box ambiguity**: the detector consistently locates the crazing areas, but bounding rectangular boundaries on sprawling, diffuse micro-crack networks are inherently subjective.
+  - Annotation noise and model weakness cannot be separated with one annotator and no repeat labels.
+- **Inclusion False Alarms**:
+  - Out of 187 inclusion detections at threshold 0.127, 50 detections (**about 27%**, 26.7%) are true background false alarms (IoU < 0.1 with any ground truth defect). This is the highest background false alarm share of any defect class.
+
+### 2. Synthetic Perturbation Robustness (Val Split, One Model)
+
+We evaluated baseline model stability under 5 synthetic perturbation families (Gaussian blur, Gaussian noise, JPEG compression, brightness, and contrast) on all 216 validation images:
+- **Evaluation Settings**: mAP50 uses all detections down to confidence floor 0.001. Recall and alerts per image use the operational 0.127 threshold.
+- **Clean Baseline Note**: Clean mAP50 is **0.760** (0.7599) in this single-image evaluation pipeline versus **0.7545** from Ultralytics `model.val` in Phase 2a. The 0.004 gap is unexplained and small (batched val letterboxing differences vs single-image predict, plus 494 vs 495 ground truth boxes parsed), and all robustness deltas are measured against the same cached clean run.
+- **Fragile to Blur, Noise, and JPEG**:
+  - The model degrades under Gaussian blur ($\Delta \text{mAP50} = -0.236$ at $\sigma=1.0$, 95% CI `[-0.274, -0.195]`), additive noise ($\Delta \text{mAP50} = -0.203$ at $\sigma=0.02$, 95% CI `[-0.245, -0.154]`), and JPEG compression ($\Delta \text{mAP50} = -0.124$ at quality 50, 95% CI `[-0.154, -0.086]`). All paired bootstrap confidence intervals are strictly away from zero.
+- **Robust to Brightness**:
+  - The detector is robust to overall illumination shifts ($0.6\times$ to $1.4\times$ brightness), with mAP50 deltas of only $-0.003$ to $-0.014$, all with confidence intervals crossing zero.
+- **Contrast Shifts & Threshold Instability**:
+  - At contrast 1.4, mAP50 drop is small ($-0.025$, 95% CI `[-0.041, -0.008]`), but operational alerts increase by **+0.4 alerts per image** (3.38 vs 2.99 clean, $\Delta = +0.389$, 95% CI `[+0.264, +0.514]`) with no recall gain ($0.794$ vs $0.782$, $\Delta = +0.012$, 95% CI `[-0.009, 0.033]`, crossing zero).
+  - The mAP50 drop is small but recall and alerts move, which suggests confidences crossing the fixed threshold and not worse ranking. A fixed threshold is not stable under these shifts.
+
+### 3. Matching IoU Sensitivity (Exploratory, Val Only)
+
+- When the matching threshold is lowered from IoU 0.5 to IoU 0.3 on validation, matched flat recall rises from **0.780** (`[0.739, 0.820]`) to **0.883** (`[0.851, 0.914]`).
+- The optimal flat threshold barely moves (**0.127** at IoU 0.5 vs **0.128** at IoU 0.3) because the alert budget ($B \le 3$ alerts/image) sets it.
+- The shipped policy and Phase 3 test results are unchanged.
 
 ---
 
@@ -286,7 +320,7 @@ python -m pytest tests/
 - [x] **Phase 2a**: YOLOv8s baseline model, Kaggle cloud training workflow, evaluation on val split, and metrics baseline.
 - [x] **Phase 2b**: Controlled experiments (resolution, model capacity, augmentations) and ablation comparison.
 - [x] **Phase 3**: Decision layer (severity, cost model, thresholds).
-- [ ] **Phase 4**: Robustness, explainability and error analysis.
+- [x] **Phase 4**: Robustness, explainability and error analysis.
 - [ ] **Phase 5**: MLOps (MLflow, DVC, CI/CD, Docker, FastAPI).
 - [ ] **Phase 6**: Data platform, simulator and live dashboard.
 - [ ] **Phase 7**: Drift monitoring, model card and demo.

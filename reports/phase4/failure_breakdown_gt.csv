@@ -1,0 +1,8 @@
+,n,tp,shared,wrong_class,poorly_localized,missed,tp_share,shared_share,wrong_class_share,poorly_localized_share,missed_share
+crazing,84,43,0,0,37,4,0.5119,0.0,0.0,0.4405,0.0476
+inclusion,127,106,0,0,17,4,0.8346,0.0,0.0,0.1339,0.0315
+patches,92,76,1,0,12,3,0.8261,0.0109,0.0,0.1304,0.0326
+pitted_surface,46,38,0,1,6,1,0.8261,0.0,0.0217,0.1304,0.0217
+rolled-in_scale,80,60,0,0,15,5,0.75,0.0,0.0,0.1875,0.0625
+scratches,66,64,0,0,1,1,0.9697,0.0,0.0,0.0152,0.0152
+all,495,387,1,1,88,18,0.7818,0.002,0.002,0.1778,0.0364
