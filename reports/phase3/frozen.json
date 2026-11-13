@@ -1,0 +1,100 @@
+{
+  "primary": {
+    "reviewer_accuracy": 0.9,
+    "budget": 3,
+    "bands": {
+      "crazing": [
+        0.1,
+        0.25
+      ],
+      "inclusion": [
+        0.25,
+        0.3
+      ],
+      "patches": [
+        0.45,
+        0.45
+      ],
+      "pitted_surface": [
+        0.05,
+        0.1
+      ],
+      "rolled-in_scale": [
+        0.15,
+        0.2
+      ],
+      "scratches": [
+        0.15,
+        0.15
+      ]
+    }
+  },
+  "secondary_a1.0": {
+    "reviewer_accuracy": 1.0,
+    "budget": 3,
+    "bands": {
+      "crazing": [
+        0.1,
+        0.4
+      ],
+      "inclusion": [
+        0.25,
+        0.6
+      ],
+      "patches": [
+        0.45,
+        0.55
+      ],
+      "pitted_surface": [
+        0.05,
+        0.65
+      ],
+      "rolled-in_scale": [
+        0.15,
+        0.55
+      ],
+      "scratches": [
+        0.15,
+        0.45
+      ]
+    }
+  },
+  "secondary_a0.8": {
+    "reviewer_accuracy": 0.8,
+    "budget": 3,
+    "bands": {
+      "crazing": [
+        0.1,
+        0.1
+      ],
+      "inclusion": [
+        0.25,
+        0.3
+      ],
+      "patches": [
+        0.45,
+        0.45
+      ],
+      "pitted_surface": [
+        0.05,
+        0.05
+      ],
+      "rolled-in_scale": [
+        0.15,
+        0.15
+      ],
+      "scratches": [
+        0.15,
+        0.15
+      ]
+    }
+  },
+  "flat_matched": {
+    "budget": 3,
+    "threshold": 0.127
+  },
+  "flat_0.25": {
+    "threshold": 0.25
+  },
+  "n_val_images": 216
+}

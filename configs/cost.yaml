@@ -1,0 +1,41 @@
+# Phase 3a decision-layer costs. ALL VALUES ARE ILLUSTRATIVE ASSUMPTIONS in abstract
+# cost units, not measured plant economics. Replace with real numbers before relying
+# on any threshold derived from them. Only the ratios matter for threshold choice.
+cost_miss: 10         # a defect that is never flagged (reaches downstream)
+cost_false_alarm: 1   # an alert with no real defect behind it
+cost_review: 0.3      # one human looks at one borderline detection
+
+# Per-class multiplier on miss cost and severity. Equal by default; override per class name.
+class_weights:
+  crazing: 1.0
+  inclusion: 1.0
+  patches: 1.0
+  pitted_surface: 1.0
+  rolled-in_scale: 1.0
+  scratches: 1.0
+
+# Area severity factor: box area / image area, linearly interpolated between the two
+# anchors and clamped outside them. Larger defects are assumed worse.
+area_severity:
+  area_frac_small: 0.02
+  area_frac_large: 0.20
+  factor_small: 0.4
+  factor_large: 2.0
+
+# severity = class_weight * area_factor. Applied to confident detections (conf >= upper).
+#   severity <  ignore_below   -> ignore
+#   severity <  monitor_below  -> monitor
+#   severity <  service_below  -> schedule_service
+#   otherwise                  -> stop_now
+action_bounds:
+  ignore_below: 0.5
+  monitor_below: 0.8
+  service_below: 1.3
+
+# Human-review band is [upper - review_band_width, upper), upper = optimal class threshold.
+review_band_width: 0.15
+
+# Phase 3b: probability that a human reviewer resolves a borderline detection correctly
+# (1.0 = perfect). Symmetric: with prob. 1-a a real defect is dismissed (becomes a miss) and a
+# false detection is confirmed (becomes a false alarm). Illustrative assumption, like the costs.
+reviewer_accuracy: 1.0

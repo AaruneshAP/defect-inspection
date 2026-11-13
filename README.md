@@ -71,11 +71,11 @@ Baseline model evaluation on the validation split (**216 images**, exactly 36 im
 
 | Defect Class | mAP@50 | Operational Note (`conf=0.25`) |
 | :--- | :--- | :--- |
-| `scratches` | **0.952** | Top performer; distinctive longitudinal aspect ratio |
-| `patches` | **0.877** | High contrast, uniform defect geometry |
-| `pitted_surface` | **0.845** | Strong texture clustering and box overlap |
-| `inclusion` | **0.813** | Solid localization on small dark anomalies |
-| `rolled-in_scale`| **0.622** | Weak class; confused with background rolling grain |
+| `scratches` | **0.952** | Top performer; possible explanation (untested): distinctive longitudinal aspect ratio |
+| `patches` | **0.877** | High performer; possible explanation (untested): high contrast and uniform geometry |
+| `pitted_surface` | **0.845** | Strong performer; possible explanation (untested): strong texture clustering and box overlap |
+| `inclusion` | **0.813** | Solid localization; possible explanation (untested): small dark anomalies |
+| `rolled-in_scale`| **0.622** | Weak class; possible explanation (untested): confused with background rolling grain |
 | `crazing` | **0.419** | Weakest class / primary bottleneck; stays weak in both (recall 0.32 at conf=0.001 and 0.38 at conf=0.25) |
 
 ### Key Observations & Limitations
@@ -83,7 +83,7 @@ Baseline model evaluation on the validation split (**216 images**, exactly 36 im
 - **Weak Classes**: `crazing` (0.419 mAP50) and `rolled-in_scale` (0.622 mAP50) represent the primary detection bottlenecks.
 - **Sample Size Limitation**: The validation split contains only **36 images per class** (216 images total), meaning single misclassifications carry noticeable percentage weight.
 - **Single Seed**: Results reflect a single deterministic run (`seed=42`).
-- **Confusion Matrix Note**: The Ultralytics confusion matrix is **not used for conclusions** because Ultralytics computes its confusion matrix at an arbitrary fixed confidence threshold rather than evaluating across the complete precision-recall curve.
+- **Confusion Matrix Note**: We do not use the Ultralytics confusion matrix for conclusions.
 
 ---
 
@@ -99,13 +99,94 @@ Controlled ablation experiments to improve performance on weak defect classes (`
 | e3_augmented | yolov8s.pt | 640 | 50 | 0.7058 | 0.6594 | 0.7261 | 0.4068 | 0.3397 | 0.8202 | 0.8642 | 0.8419 | 0.5941 | 0.8965 |
 
 ### Summary & Honest Empirical Analysis
-- **No Experiment Clearly Beat the Baseline**: None of the interventions achieved a statistically significant breakthrough over the E0 baseline (0.755 mAP50).
-- **E1 (320×320) Matches Baseline at Lower Cost**: E1 achieved 0.758 mAP50 with 4× smaller pixel processing cost, proving that downsampling closer to the native 200×200 source resolution preserves feature quality without upsampling blur.
-- **Larger Model and Augmentation Bundle Did Not Help**: E2 (YOLOv8m, 25.9M params) dropped crazing AP50 to 0.326 due to overfitting on 1,224 training images. E3's heavy spatial and photometric augmentations (rotation, scale jitter, HSV shifts) degraded subtle texture cues (crazing AP50 0.340, rolled-in scale 0.594).
-- **Crazing Bottleneck Persists (0.33–0.43 AP50)**: Crazing stayed at 0.33–0.43 in every single run, which suggests a data or labeling limit (such as faint contrast, ambiguous boundary annotations, or label noise) to be checked in error analysis.
+- **No Clear Improvement Over Baseline**: None of the interventions showed a clear improvement over the E0 baseline (0.755 mAP50).
+- **E1 (320×320) Matched the Baseline Within Noise at Lower Cost**: E1 achieved 0.758 mAP50 with 4× smaller pixel processing cost, matching the baseline within noise; a possible explanation (untested) is that downsampling closer to the native 200×200 source resolution preserves feature quality without upsampling blur.
+- **Larger Model and Augmentation Bundle Did Not Help**: E2 (YOLOv8m, 25.9M params) dropped crazing AP50 to 0.326; a possible explanation (untested) is overfitting on 1,224 training images. E3 (crazing AP50 0.340, rolled-in scale 0.594) did not improve performance; a possible explanation (untested) is that heavy spatial and photometric augmentations (rotation, scale jitter, HSV shifts) may degrade subtle texture cues.
+- **Crazing Bottleneck Persists (0.33–0.43 AP50)**: Crazing stayed at 0.33–0.43 in every single run; a possible explanation (untested) is an underlying data or labeling limit (such as faint contrast, ambiguous boundary annotations, or label noise) to be checked in error analysis.
 - **Exact Reproducibility**: E0 reproduced Phase 2a exactly (0.7545 mAP50, 0.4301 mAP50-95, 0.4189 crazing AP50).
 - **Statistical Context**: Results come from a single deterministic seed (`seed=42`) with only 36 images per class in validation, so small metric gaps are noise.
 
+
+---
+
+## Phase 3: Decision Layer
+
+Phase 3 implements an operational decision layer that maps raw bounding box detections to factory actions through an explicit cost model, severity scoring, per-class threshold calibration, and optional human-in-the-loop review bands. The entire evaluation protocol was pre-registered prior to running inference on the reserved test split.
+
+### Decision Layer Design
+
+1. **Cost Model Formulation**:
+   - Total industrial cost evaluates missed flaws, false alarms, and inspection overhead:
+     $$\text{Total Cost} = \sum_{\text{missed defects}} (\text{cost\_miss} \times \text{severity}) + \sum_{\text{false alarms}} \text{cost\_false\_alarm} + \sum_{\text{reviewed boxes}} \text{cost\_review}$$
+   - **Baseline Cost Weights** (`configs/cost.yaml`): $\text{cost\_miss} = 10$, $\text{cost\_false\_alarm} = 1$, $\text{cost\_review} = 0.3$.
+   - **Matching Protocol**: Class-aware greedy matching at $\text{IoU} \ge 0.5$, sorted by confidence descending. Duplicate detections matching an already-claimed ground truth count as false alarms.
+2. **Severity-to-Action Mapping**:
+   - Defect severity is computed as $\text{severity} = \text{class\_weight} \times \text{area\_factor}$, where area factor scales linearly with box area fraction from $0.4$ (small defect, $\le 2\%$ image area) to $2.0$ (large defect, $\ge 20\%$ image area).
+   - If detection confidence falls in a review band, action is `human_review`.
+   - If detection confidence meets the alert threshold, severity triggers automated factory responses:
+     - $\text{severity} < 0.5$: `ignore` (minor surface blemish)
+     - $0.5 \le \text{severity} < 0.8$: `monitor` (log defect trend)
+     - $0.8 \le \text{severity} < 1.3$: `schedule_service` (flag roll inspection)
+     - $\text{severity} \ge 1.3$: `stop_now` (immediate line emergency halt)
+3. **Optional Review Band & Workload Budget**:
+   - Per-class confidence band $[\text{lower}, \text{upper})$: detections with $\text{conf} \ge \text{upper}$ alert directly; $\text{lower} \le \text{conf} < \text{upper}$ route to a human inspector; $\text{conf} < \text{lower}$ are ignored.
+   - Reviewer accuracy $a$: symmetric model where a human reviewer correctly verifies defects with probability $a$ ($a=0.9$ primary, $a=1.0$ and $a=0.8$ secondary).
+   - Workload constraint: average inspection budget $B \le 3$ (combined alerts + reviews per image $\le 3$ on validation set).
+
+### Pre-Registered Primary Outcome (Not Supported on Val and Test)
+
+Prior to running on the test set (`reports/phase3/preregistration.md`), we pre-registered the primary hypothesis: *a tuned per-class review band policy ($a=0.9, B \le 3$) delivers statistically significant cost savings over a matched flat alerting baseline ($0.127$).* The pre-registered success criterion required the 95% bootstrap confidence interval of cost saving to lie strictly above zero.
+
+- **Validation Split (216 images)**:
+  - Primary policy cost: **1610.7** vs matched flat cost: **1688.1**.
+  - Cost saving: **77.4** (**4.6%**), but 95% bootstrap CI was **`[-33.7, 194.3]`** (percentage CI **`[-2.1%, 11.1%]`**).
+  - *Result*: The interval crosses zero (lower bound **−33.7**), so the primary outcome was **not supported on validation**.
+- **Test Split (360 images, 854 ground truth defects)**:
+  - Primary policy cost: **3052.7** (cost/image **8.480** `[7.321, 9.709]`, recall **0.760** `[0.731, 0.788]`, alerts/image **2.525**, reviews/image **0.833**).
+  - Matched flat (0.127) cost: **3041.9** (cost/image **8.450** `[7.248, 9.670]`, recall **0.785** `[0.756, 0.812]`, alerts/image **3.400**, reviews/image **0.000**).
+  - Cost saving vs matched flat: **−10.8** (**−0.4%**, 95% CI **`[-225.7, 193.3]`**, percentage CI **`[-7.8%, 6.2%]`**).
+  - *Result*: The primary outcome was **not supported on test**; the matched flat baseline achieved slightly lower total cost, and the difference is well within statistical noise.
+
+### Test Split Results Table (360 Images)
+
+| Policy | Total Cost | Cost / Image (95% CI) | Recall (95% CI) | Alerts / Img | Reviews / Img | Saving vs Flat 0.25 (%) | Saving vs Matched Flat (%) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `primary (a=0.9, B<=3)` | **3052.7** | 8.480 [7.321, 9.709] | 0.760 [0.731, 0.788] | 2.525 | 0.833 | **857.9** (21.9% [15.7, 27.8]) | **-10.8** (-0.4% [-7.8, 6.2]) |
+| `matched flat (0.127)` | **3041.9** | 8.450 [7.248, 9.670] | 0.785 [0.756, 0.812] | 3.400 | 0.000 | **868.7** (22.2% [16.1, 28.2]) | **0.0** (reference) |
+| `secondary a=1.0` | **2791.3** | 7.754 [6.631, 8.948] | 0.767 [0.738, 0.795] | 1.436 | 1.922 | **1119.3** (28.6% [22.1, 34.9]) | **250.6** (8.2% [1.0, 14.9]) |
+| `secondary a=0.8` | **3065.7** | 8.516 [7.344, 9.754] | 0.766 [0.737, 0.795] | 3.294 | 0.064 | **844.9** (21.6% [14.7, 28.1]) | **-23.8** (-0.8% [-8.3, 6.0]) |
+| `flat 0.25` | **3910.6** | 10.863 [9.363, 12.399] | 0.700 [0.665, 0.735] | 2.425 | 0.000 | **0.0** (reference) | **-868.7** (-28.6% [-39.3, -19.1]) |
+| `no alerts` | **11549.4** | 32.082 [30.540, 33.607] | 0.000 [0.000, 0.000] | 0.000 | 0.000 | **-7638.8** (-195.3%) | **-8507.5** (-279.7%) |
+
+### Main Finding
+
+1. **Cost-Tuned Thresholds Beat Default 0.25 by ~22%**:
+   - Aligning detection thresholds with asymmetric factory costs (where missing a defect costs 10× a false alarm) produced a substantial **21.9% to 22.2% cost reduction** on the test set compared to the standard `0.25` threshold (saving **857.9** to **868.7** cost units).
+2. **A Single Matched Global Threshold Matches Complex Policies**:
+   - A single global threshold of **`0.127`** (matched on validation alert workload) achieved a total test cost of **3041.9**, matching the primary per-class review-band policy (**3052.7**) within noise.
+   - **Practical Takeaway**: In this industrial inspection setting, optimizing a single operating point captures all economic benefits without the operational friction, latency, and maintenance burden of per-class review bands.
+
+### Secondary Result & Caveats
+
+- **Infallible Reviewer Scenario ($a=1.0$)**:
+  - If human review is assumed to be 100% accurate ($a=1.0$), the policy achieves a test cost of **2791.3**, saving **250.6** (**8.2%**, 95% CI `[28.5, 465.2]`, `[1.0%, 14.9%]`) over matched flat alerting.
+- **Caveats**:
+  - This benefit is brittle and depends entirely on the unrealistic assumption of perfect human inspection ($a=1.0$).
+  - Once human error is modeled ($a=0.9$), the advantage drops to **−0.4%** (`[-7.8%, 6.2%]`).
+  - At $a=0.8$, the policy barely utilizes review (only **0.064** reviews/image, test cost **3065.7**, saving **−0.8%**, 95% CI `[-8.3%, 6.0%]`) because human errors incur expensive false alarm and miss penalties that outweigh the review band's utility.
+
+### Sensitivity Summary
+
+A 24-condition grid sweep across miss-to-false-alarm cost ratios (2, 3, 5, 10, 20, 50) and review costs (0.1, 0.3, 0.6, 1.0) on validation revealed:
+- **Narrow Viability Window**: Review bands show statistically significant cost savings **only when review is very cheap ($0.1$)** and the miss penalty ratio is modest ($\le 10$). For example, at ratio 2 and review cost 0.1, savings reach **23.6%** (95% CI `[18.0%, 29.4%]`).
+- **High Penalty Ineffectiveness**: At higher miss-to-false-alarm ratios ($\ge 20$) or realistic review costs ($\ge 0.6$), the 95% CI crosses zero across all conditions. When missed flaws are costly, the optimal policy simply alerts directly rather than routing ambiguous items to review.
+
+### Methodological Limitations
+
+1. **Illustrative Cost Parameters**: Costs (10 miss / 1 false alarm / 0.3 review) are illustrative engineering benchmarks rather than site-specific plant accounting data.
+2. **Absence of Defect-Free Images**: Every image in the NEU-DET database contains at least one defect. False alarm rates on pristine, flaw-free steel sheets cannot be measured on this dataset.
+3. **Prior Validation Split Exposure**: The validation set was utilized in Phase 2 for baseline verification and experimental comparison prior to Phase 3 threshold tuning.
+4. **Single Test Evaluation**: The test set (360 images) was strictly held out and evaluated exactly once using frozen pre-registered thresholds without retuning.
 
 ---
 
@@ -204,5 +285,8 @@ python -m pytest tests/
 - [x] **Phase 1**: Project scaffolding, interface definitions, Pascal VOC to YOLO conversion, stratified splitting, and EDA.
 - [x] **Phase 2a**: YOLOv8s baseline model, Kaggle cloud training workflow, evaluation on val split, and metrics baseline.
 - [x] **Phase 2b**: Controlled experiments (resolution, model capacity, augmentations) and ablation comparison.
-- [ ] **Phase 3**: Inference engine, per-class confidence threshold calibration, and factory API.
-- [ ] **Phase 4**: Production serving, final evaluation on reserved test split, and documentation.
+- [x] **Phase 3**: Decision layer (severity, cost model, thresholds).
+- [ ] **Phase 4**: Robustness, explainability and error analysis.
+- [ ] **Phase 5**: MLOps (MLflow, DVC, CI/CD, Docker, FastAPI).
+- [ ] **Phase 6**: Data platform, simulator and live dashboard.
+- [ ] **Phase 7**: Drift monitoring, model card and demo.

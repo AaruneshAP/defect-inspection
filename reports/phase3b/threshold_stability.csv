@@ -1,0 +1,13 @@
+policy,class,upper_across_folds,lower_across_folds
+"tuned thresholds, no band",crazing,0.05 0.02 0.02 0.05 0.02,0.05 0.02 0.02 0.05 0.02
+"tuned thresholds, no band",inclusion,0.10 0.10 0.10 0.10 0.10,0.10 0.10 0.10 0.10 0.10
+"tuned thresholds, no band",patches,0.02 0.02 0.02 0.02 0.05,0.02 0.02 0.02 0.02 0.05
+"tuned thresholds, no band",pitted_surface,0.05 0.05 0.05 0.05 0.05,0.05 0.05 0.05 0.05 0.05
+"tuned thresholds, no band",rolled-in_scale,0.05 0.05 0.05 0.05 0.10,0.05 0.05 0.05 0.05 0.10
+"tuned thresholds, no band",scratches,0.15 0.15 0.15 0.15 0.15,0.15 0.15 0.15 0.15 0.15
+"tuned band, acc=1",crazing,0.40 0.40 off 0.40 0.65,0.01 0.01 0.01 0.01 0.01
+"tuned band, acc=1",inclusion,0.55 0.60 0.55 0.60 0.60,0.01 0.01 0.05 0.10 0.01
+"tuned band, acc=1",patches,0.55 0.55 0.55 0.55 0.60,0.02 0.02 0.02 0.02 0.02
+"tuned band, acc=1",pitted_surface,0.65 0.65 0.65 0.65 0.65,0.01 0.01 0.01 0.02 0.01
+"tuned band, acc=1",rolled-in_scale,0.55 0.55 0.55 0.55 0.55,0.01 0.01 0.01 0.01 0.01
+"tuned band, acc=1",scratches,0.45 0.45 0.15 0.45 0.45,0.05 0.15 0.05 0.05 0.05
