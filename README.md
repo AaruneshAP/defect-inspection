@@ -224,6 +224,35 @@ We evaluated baseline model stability under 5 synthetic perturbation families (G
 
 ---
 
+## Phase 5: Reproducible, Tracked, Containerized
+
+Phase 5 establishes reproducible environments, experiment tracking, model registry management, automated CI workflows, and a containerized line-side FastAPI inference microservice:
+
+### 1. Reproducible Environment & CI Pipeline
+- **Environment Automation**: Defined via `scripts/setup.ps1` and virtual environment setup with pinned top-level dependencies in `requirements.txt` and developer tooling in `requirements-dev.txt`.
+- **Hermetic CI Execution**: GitHub Actions workflow (`.github/workflows/ci.yml`) executes Ruff linting and the Pytest test suite across all modules on Python 3.13. Data-dependent tests requiring local git-ignored assets (`data/yolo`, `data/cache/`, `models/best.pt`) are automatically skipped in CI via `tests/conftest.py` hooks without masking failures in discovery or business logic.
+
+### 2. MLflow Tracking & Model Registry
+- **Tracking Store**: Configured using a local file store backend (`src/tracking.py` and `docs/tracking.md`).
+- **Historical Backfill**: Historical Phase 2b controlled experiments (E0–E3) and Phase 3 policy evaluation results were backfilled into MLflow runs (`scripts/backfill_mlflow.py`) with full hyperparameter logs, evaluation metrics, and artifact tracking (`comparison.csv`, figures, policy configs).
+- **Provenance & Limitations**: The recorded `git_commit` tag reflects the commit that recorded the experiment results. The Phase 3 bootstrap seed is unrecorded. The baseline weights were registered into the MLflow model registry under alias `@production` (and `@champion`).
+
+### 3. FastAPI Service & Docker Containerization
+- **REST Inspection API**: FastAPI application (`app/main.py`, `app/service.py`) exposing `/health`, `/model-info`, and `/predict`.
+  - `/predict` processes multipart image uploads (1..8 images), applies the frozen Phase 3 decision policy (`reports/phase3/frozen.json`), and returns individual defect bounding boxes, severities, and recommended actions.
+  - By default, `/predict` omits detections whose action is `ignore`. An optional query parameter `include_ignored=true` returns all detections down to the confidence floor while keeping the rolled-up per-image `decision` identical.
+- **Docker Packaging**: Containerized via multi-stage CPU-only `Dockerfile` (`python:3.13-slim`, CPU PyTorch, headless OpenCV `5.0.0.93`, non-root user `uid 10001`, and built-in Docker `HEALTHCHECK`).
+- **Local Verification (Docker Desktop)**: Verified container runs healthy, operates as non-root user `appuser` (`uid 10001`), mounts `models/best.pt` read-only at runtime, matches model version `sha256:dff41d9a7f7b`, and successfully processes real validation images (`crazing_107.jpg` and `scratches_1.jpg`).
+- **CI Verification**: GitHub Actions validates container image building and runs a no-weights smoke test verifying that `/health` reports `status: ok` and `/predict` returns HTTP 503.
+
+### 4. Honest Limitations & Design Choices
+- **Decision Roll-up**: The per-image decision roll-up ("most urgent detection wins": `stop_now` > `schedule_service` > `human_review` > `monitor` > `ignore`) is a design choice that has not been evaluated; Phase 3 evaluated per-detection cost only.
+- **DVC Deferred**: DVC data versioning is deferred because the NEU-DET dataset is not redistributable under its unknown license, and the model artifact is a single static weights file (`models/best.pt`).
+- **Local File Store**: MLflow uses a local file store (`mlruns/`) rather than a remote server until cloud migration (e.g., Databricks).
+- **Dependency Pinning**: Only top-level dependencies are pinned in `requirements.txt`; the containerized production image enforces a frozen `constraints.txt` file (with Windows-only dependencies removed).
+
+---
+
 ## Architecture & Directory Structure
 
 ```text
@@ -321,6 +350,6 @@ python -m pytest tests/
 - [x] **Phase 2b**: Controlled experiments (resolution, model capacity, augmentations) and ablation comparison.
 - [x] **Phase 3**: Decision layer (severity, cost model, thresholds).
 - [x] **Phase 4**: Robustness, explainability and error analysis.
-- [ ] **Phase 5**: MLOps (MLflow, DVC, CI/CD, Docker, FastAPI).
+- [x] **Phase 5**: MLOps (MLflow, DVC, CI/CD, Docker, FastAPI).
 - [ ] **Phase 6**: Data platform, simulator and live dashboard.
 - [ ] **Phase 7**: Drift monitoring, model card and demo.

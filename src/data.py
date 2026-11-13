@@ -6,12 +6,11 @@ Inputs: Raw dataset paths, Pascal VOC XML files, target defect class definitions
 Outputs: Parsed annotation records, normalized YOLO bounding box files, partitioned image directories, and dataset metadata.
 """
 
-import os
 import random
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 CLASS_NAMES: List[str] = [
     "crazing",

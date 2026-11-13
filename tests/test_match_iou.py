@@ -84,6 +84,7 @@ def test_sensitivity_hand_computed(files):
     assert th.loc[0.5, "n_gt_matched"] == 0 and th.loc[0.3, "n_gt_matched"] == 10
 
 
+@pytest.mark.requires_cache
 def test_frozen_matched_threshold_is_unchanged_at_default():
     """Regression: on the real val cache the default match IoU still gives the frozen matched flat threshold."""
     cache = Path("data/cache/val_detections.parquet")

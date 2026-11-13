@@ -7,9 +7,13 @@ Outputs: Pytest assertion passes or failures enforcing data integrity.
 """
 
 from pathlib import Path
+
+import pytest
+
 from src.data import CLASS_NAMES, CLASS_TO_IDX, parse_voc_xml, voc_to_yolo_bbox
 
 
+@pytest.mark.requires_data
 def test_xml_parser_output() -> None:
     """
     Verifies that parse_voc_xml extracts valid dimensions and bounding boxes.
@@ -61,6 +65,10 @@ def test_converted_boxes_lie_within_image() -> None:
     assert 0.0 < w <= 1.0
     assert 0.0 < h <= 1.0
 
+
+@pytest.mark.requires_data
+def test_label_files_are_normalized() -> None:
+    """Every YOLO label file under data/yolo has 5 fields, a valid class id and coordinates in [0, 1]."""
     label_files = list(Path("data/yolo/labels").rglob("*.txt"))
     assert len(label_files) > 0
 
@@ -80,6 +88,7 @@ def test_converted_boxes_lie_within_image() -> None:
             assert 0.0 <= h <= 1.0
 
 
+@pytest.mark.requires_data
 def test_image_and_label_counts_match_per_split() -> None:
     """
     Verifies that image and label counts match exactly within each split.
@@ -105,6 +114,7 @@ def test_image_and_label_counts_match_per_split() -> None:
         assert img_stems == lbl_stems
 
 
+@pytest.mark.requires_data
 def test_no_image_appears_in_two_splits() -> None:
     """
     Verifies that no image is shared between any two dataset splits.

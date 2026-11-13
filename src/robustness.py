@@ -11,7 +11,7 @@ image bootstrap: the same resampled images are used for the clean and the pertur
 
 import argparse
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd

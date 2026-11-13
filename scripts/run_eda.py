@@ -6,10 +6,9 @@ Inputs: YOLO formatted dataset directories, label text files, and image files.
 Outputs: Exported PNG figures in reports/figures/ covering split distributions, box sizes, sample grids, and pixel intensities.
 """
 
-import hashlib
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import List
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.patches as patches

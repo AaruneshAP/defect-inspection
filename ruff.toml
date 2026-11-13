@@ -1,0 +1,12 @@
+# Correctness-focused lint: pyflakes + core pycodestyle errors. Style rules are not enforced.
+extend-exclude = ["notebooks", ".venv", "mlruns"]
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["E731", "E741"]  # lambda assignment / short names are used deliberately
+
+[lint.per-file-ignores]
+# Frozen Phase 3 code and training logic are deliberately left untouched.
+"src/evaluate.py" = ["F401"]
+"src/phase3c.py" = ["F541"]
+"src/train.py" = ["F841"]

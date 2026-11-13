@@ -1,0 +1,7 @@
+﻿# Development / CI dependencies. Install on top of requirements.txt.
+-r requirements.txt
+pytest==9.2.0
+nbformat==5.11.1
+ruff==0.17.5
+mlflow==3.18.0
+httpx==0.28.1

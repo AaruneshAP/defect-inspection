@@ -7,11 +7,9 @@ Outputs: Pytest assertion passes or failures enforcing training pipeline integri
 """
 
 from pathlib import Path
-from typing import Any
 import json
 import pytest
 from src.data import (
-    CLASS_NAMES,
     find_kaggle_dataset,
 )
 from src.train import (
@@ -259,9 +257,28 @@ def test_save_results(tmp_path: Path) -> None:
     assert loaded["per_class_ap"]["scratches"]["ap50-95"] == 0.608
 
 
-def test_find_kaggle_dataset_missing_error(tmp_path: Path) -> None:
+def test_find_kaggle_dataset_discovery(tmp_path: Path) -> None:
     """
-    Verifies that find_kaggle_dataset raises FileNotFoundError with explicit guidance when absent.
+    Verifies that find_kaggle_dataset discovers a fake NEU-DET folder structure containing a train folder and XML.
+
+    Inputs:
+        tmp_path (Path): Pytest temporary directory fixture.
+
+    Outputs:
+        None: Raises AssertionError if dataset discovery fails.
+    """
+    fake_root = tmp_path / "fake_kaggle"
+    fake_neu = fake_root / "NEU-DET"
+    (fake_neu / "train").mkdir(parents=True)
+    (fake_neu / "sample.xml").write_text("<annotation><object></object></annotation>", encoding="utf-8")
+
+    found = find_kaggle_dataset(fake_root)
+    assert found == fake_neu
+
+
+def test_find_kaggle_dataset_missing_or_empty_raises(tmp_path: Path) -> None:
+    """
+    Verifies that find_kaggle_dataset raises FileNotFoundError with explicit guidance when absent or empty.
 
     Inputs:
         tmp_path (Path): Pytest temporary directory fixture.
@@ -276,11 +293,6 @@ def test_find_kaggle_dataset_missing_error(tmp_path: Path) -> None:
     empty_root.mkdir()
     with pytest.raises(FileNotFoundError, match="Attach the NEU Surface Defect Database under Add Input"):
         find_kaggle_dataset(empty_root)
-
-    valid_neu = empty_root / "neu-surface-defect-database" / "NEU-DET"
-    valid_neu.mkdir(parents=True)
-    found = find_kaggle_dataset(empty_root)
-    assert found == valid_neu
 
 
 def test_results_path_trainer_save_dir_and_project_runs(tmp_path: Path) -> None:

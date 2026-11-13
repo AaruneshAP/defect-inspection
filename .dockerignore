@@ -1,0 +1,10 @@
+# Whitelist: ignore everything, then allow only what the image needs.
+*
+!requirements.txt
+!constraints.txt
+!app
+!src
+!configs
+!reports/phase3/frozen.json
+**/__pycache__
+**/*.pyc
