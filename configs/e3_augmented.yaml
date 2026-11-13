@@ -1,0 +1,30 @@
+# Experiment 3 (E3): Domain-specific data augmentations tuned for hot-rolled steel surface textures
+model: yolov8s.pt
+data: data/yolo/data.yaml
+epochs: 50
+imgsz: 640
+batch: 16
+seed: 42
+patience: 15
+optimizer: auto
+lr0: 0.001
+lrf: 0.01
+device: 0
+project: runs
+name: e3_augmented
+save: true
+plots: true
+
+# Steel texture augmentations
+fliplr: 0.5
+flipud: 0.5
+hsv_h: 0.015
+hsv_s: 0.7
+hsv_v: 0.4
+degrees: 10.0
+translate: 0.1
+scale: 0.5
+mosaic: 1.0
+mixup: 0.0
+close_mosaic: 10
+

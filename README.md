@@ -76,13 +76,35 @@ Baseline model evaluation on the validation split (**216 images**, exactly 36 im
 | `pitted_surface` | **0.845** | Strong texture clustering and box overlap |
 | `inclusion` | **0.813** | Solid localization on small dark anomalies |
 | `rolled-in_scale`| **0.622** | Weak class; confused with background rolling grain |
-| `crazing` | **0.419** | Weakest class / primary bottleneck; recall drops to **0.381** at `conf=0.25` |
+| `crazing` | **0.419** | Weakest class / primary bottleneck; stays weak in both (recall 0.32 at conf=0.001 and 0.38 at conf=0.25) |
 
 ### Key Observations & Limitations
-- **Weak Classes**: `crazing` (0.419 mAP50) and `rolled-in_scale` (0.622 mAP50) represent the primary detection bottlenecks. `crazing` features low-contrast, web-like micro-cracks that easily blend into the hot-rolled metal background; at an operational confidence threshold of `conf=0.25`, crazing recall falls to only **0.381**.
+- **Confidence Threshold Effect**: At conf=0.25, overall recall is slightly higher (0.733 vs 0.713) and precision lower (0.690 vs 0.725). mAP is lower (0.668 vs 0.755) because truncating low-confidence detections shortens the precision-recall curve; the conf=0.001 figure is the standard mAP. Crazing stays weak in both (recall 0.32 and 0.38).
+- **Weak Classes**: `crazing` (0.419 mAP50) and `rolled-in_scale` (0.622 mAP50) represent the primary detection bottlenecks.
 - **Sample Size Limitation**: The validation split contains only **36 images per class** (216 images total), meaning single misclassifications carry noticeable percentage weight.
 - **Single Seed**: Results reflect a single deterministic run (`seed=42`).
 - **Confusion Matrix Note**: The Ultralytics confusion matrix is **not used for conclusions** because Ultralytics computes its confusion matrix at an arbitrary fixed confidence threshold rather than evaluating across the complete precision-recall curve.
+
+---
+
+## Phase 2b Results
+
+Controlled ablation experiments to improve performance on weak defect classes (`crazing` and `rolled-in_scale`), evaluated strictly on the validation split (**216 images**, exactly 36 images per class, `seed=42`, 50 epochs on Kaggle GPU):
+
+| experiment | model | imgsz | epochs | precision | recall | mAP50 | mAP50-95 | crazing_AP50 | inclusion_AP50 | patches_AP50 | pitted_surface_AP50 | rolled-in_scale_AP50 | scratches_AP50 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| e0_baseline | yolov8s.pt | 640 | 50 | 0.7248 | 0.7134 | 0.7545 | 0.4301 | 0.4189 | 0.8132 | 0.8772 | 0.8446 | 0.6215 | 0.9517 |
+| e1_imgsz320 | yolov8s.pt | 320 | 50 | 0.6999 | 0.7372 | 0.7578 | 0.43 | 0.4311 | 0.8209 | 0.8884 | 0.8639 | 0.632 | 0.9104 |
+| e2_yolov8m_640 | yolov8m.pt | 640 | 50 | 0.6593 | 0.7227 | 0.7404 | 0.4375 | 0.3262 | 0.8208 | 0.8896 | 0.8441 | 0.6311 | 0.9305 |
+| e3_augmented | yolov8s.pt | 640 | 50 | 0.7058 | 0.6594 | 0.7261 | 0.4068 | 0.3397 | 0.8202 | 0.8642 | 0.8419 | 0.5941 | 0.8965 |
+
+### Summary & Honest Empirical Analysis
+- **No Experiment Clearly Beat the Baseline**: None of the interventions achieved a statistically significant breakthrough over the E0 baseline (0.755 mAP50).
+- **E1 (320×320) Matches Baseline at Lower Cost**: E1 achieved 0.758 mAP50 with 4× smaller pixel processing cost, proving that downsampling closer to the native 200×200 source resolution preserves feature quality without upsampling blur.
+- **Larger Model and Augmentation Bundle Did Not Help**: E2 (YOLOv8m, 25.9M params) dropped crazing AP50 to 0.326 due to overfitting on 1,224 training images. E3's heavy spatial and photometric augmentations (rotation, scale jitter, HSV shifts) degraded subtle texture cues (crazing AP50 0.340, rolled-in scale 0.594).
+- **Crazing Bottleneck Persists (0.33–0.43 AP50)**: Crazing stayed at 0.33–0.43 in every single run, which suggests a data or labeling limit (such as faint contrast, ambiguous boundary annotations, or label noise) to be checked in error analysis.
+- **Exact Reproducibility**: E0 reproduced Phase 2a exactly (0.7545 mAP50, 0.4301 mAP50-95, 0.4189 crazing AP50).
+- **Statistical Context**: Results come from a single deterministic seed (`seed=42`) with only 36 images per class in validation, so small metric gaps are noise.
 
 
 ---
@@ -181,6 +203,6 @@ python -m pytest tests/
 
 - [x] **Phase 1**: Project scaffolding, interface definitions, Pascal VOC to YOLO conversion, stratified splitting, and EDA.
 - [x] **Phase 2a**: YOLOv8s baseline model, Kaggle cloud training workflow, evaluation on val split, and metrics baseline.
-- [ ] **Phase 2b**: Targeted augmentations (CLAHE, mosaic, scale variation) to resolve crazing bottleneck.
+- [x] **Phase 2b**: Controlled experiments (resolution, model capacity, augmentations) and ablation comparison.
 - [ ] **Phase 3**: Inference engine, per-class confidence threshold calibration, and factory API.
 - [ ] **Phase 4**: Production serving, final evaluation on reserved test split, and documentation.

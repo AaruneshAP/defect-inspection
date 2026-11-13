@@ -16,9 +16,13 @@ from src.data import (
 )
 from src.train import (
     DEFAULT_CLASSES,
+    build_comparison_table,
     evaluate,
+    is_cache_valid,
     load_config,
     parse_training_metrics,
+    plot_per_class_comparison,
+    resolve_training_epochs,
     save_results,
 )
 
@@ -188,7 +192,7 @@ def test_evaluate_rejects_test_split() -> None:
 
 def test_notebook_code_cells_syntax() -> None:
     """
-    Verifies that all code cells in notebooks/02_yolo_baseline.ipynb parse without Python syntax errors.
+    Verifies that all code cells in all notebooks parse without Python syntax errors.
 
     Inputs:
         None.
@@ -199,18 +203,19 @@ def test_notebook_code_cells_syntax() -> None:
     import ast
     import nbformat
 
-    notebook_path = Path("notebooks/02_yolo_baseline.ipynb")
-    assert notebook_path.is_file()
+    notebooks = sorted(list(Path("notebooks").glob("*.ipynb")))
+    assert len(notebooks) >= 2
 
-    with open(notebook_path, "r", encoding="utf-8") as f:
-        nb = nbformat.read(f, as_version=4)
+    for nb_path in notebooks:
+        with open(nb_path, "r", encoding="utf-8") as f:
+            nb = nbformat.read(f, as_version=4)
 
-    for idx, cell in enumerate(nb.cells):
-        if cell.cell_type == "code":
-            try:
-                ast.parse(cell.source)
-            except SyntaxError as err:
-                raise AssertionError(f"SyntaxError in code cell {idx}: {err}")
+        for idx, cell in enumerate(nb.cells):
+            if cell.cell_type == "code":
+                try:
+                    ast.parse(cell.source)
+                except SyntaxError as err:
+                    raise AssertionError(f"SyntaxError in {nb_path.name} code cell {idx}: {err}")
 
 
 def test_save_results(tmp_path: Path) -> None:
@@ -299,6 +304,273 @@ def test_results_path_trainer_save_dir_and_project_runs(tmp_path: Path) -> None:
     results_path = save_results({"status": "ok"}, custom_trainer_save_dir / "results.json")
     assert Path(results_path).is_file()
     assert Path(results_path).parent == custom_trainer_save_dir
+
+
+def test_phase2b_experiment_configs() -> None:
+    """
+    Verifies that Phase 2b experiment configurations (E1, E2, E3) load with expected hyperparameters.
+
+    Inputs:
+        None.
+
+    Outputs:
+        None: Raises AssertionError if configs are missing or invalid.
+    """
+    e1 = load_config("configs/e1_imgsz320.yaml")
+    assert e1["imgsz"] == 320
+    assert e1["model"] == "yolov8s.pt"
+    assert e1["project"] == "runs"
+
+    e2 = load_config("configs/e2_yolov8m_640.yaml")
+    assert e2["imgsz"] == 640
+    assert e2["model"] == "yolov8m.pt"
+    assert e2["project"] == "runs"
+
+    e3 = load_config("configs/e3_augmented.yaml")
+    assert e3["imgsz"] == 640
+    assert e3["model"] == "yolov8s.pt"
+    assert e3["fliplr"] == 0.5
+    assert e3["flipud"] == 0.5
+    assert e3["hsv_v"] == 0.4
+    assert e3["mixup"] == 0.0
+    assert e3["close_mosaic"] == 10
+
+
+def test_build_comparison_table_from_dict(tmp_path: Path) -> None:
+    """
+    Verifies that build_comparison_table flattens experiment dictionaries and writes a valid CSV file.
+
+    Inputs:
+        tmp_path (Path): Pytest temporary directory fixture.
+
+    Outputs:
+        None: Raises AssertionError if comparison rows or CSV output are malformed.
+    """
+    import csv
+
+    sample_experiments = {
+        "E0_baseline": {
+            "model": "yolov8s.pt",
+            "imgsz": 640,
+            "precision": 0.725,
+            "recall": 0.713,
+            "mAP50": 0.755,
+            "mAP50-95": 0.430,
+            "per_class_ap": {
+                "crazing": {"ap50": 0.419, "ap50-95": 0.147},
+                "inclusion": {"ap50": 0.813, "ap50-95": 0.446},
+                "patches": {"ap50": 0.877, "ap50-95": 0.564},
+                "pitted_surface": {"ap50": 0.845, "ap50-95": 0.602},
+                "rolled-in_scale": {"ap50": 0.622, "ap50-95": 0.313},
+                "scratches": {"ap50": 0.952, "ap50-95": 0.508},
+            },
+        },
+        "E1_imgsz320": {
+            "model": "yolov8s.pt",
+            "imgsz": 320,
+            "precision": 0.680,
+            "recall": 0.670,
+            "mAP50": 0.710,
+            "mAP50-95": 0.390,
+            "per_class_ap": {
+                "crazing": {"ap50": 0.380, "ap50-95": 0.120},
+                "inclusion": {"ap50": 0.790, "ap50-95": 0.410},
+                "patches": {"ap50": 0.850, "ap50-95": 0.520},
+                "pitted_surface": {"ap50": 0.810, "ap50-95": 0.570},
+                "rolled-in_scale": {"ap50": 0.580, "ap50-95": 0.280},
+                "scratches": {"ap50": 0.930, "ap50-95": 0.480},
+            },
+        },
+    }
+
+    out_csv = tmp_path / "comparison.csv"
+    rows = build_comparison_table(sample_experiments, output_csv=out_csv)
+
+    assert len(rows) == 2
+    assert rows[0]["experiment"] == "E0_baseline"
+    assert rows[0]["mAP50"] == 0.755
+    assert rows[0]["crazing_AP50"] == 0.419
+    assert rows[0]["scratches_AP50"] == 0.952
+    assert rows[1]["experiment"] == "E1_imgsz320"
+    assert rows[1]["imgsz"] == 320
+
+    assert out_csv.is_file()
+    with open(out_csv, "r", encoding="utf-8") as f:
+        reader = list(csv.DictReader(f))
+    assert len(reader) == 2
+    assert "crazing_AP50" in reader[0]
+    assert float(reader[0]["crazing_AP50"]) == 0.419
+
+
+def test_build_comparison_table_from_directory(tmp_path: Path) -> None:
+    """
+    Verifies that build_comparison_table scans directory trees for results.json files.
+
+    Inputs:
+        tmp_path (Path): Pytest temporary directory fixture.
+
+    Outputs:
+        None: Raises AssertionError if directory scanning fails.
+    """
+    exp_dir1 = tmp_path / "reports" / "phase2b" / "e0_baseline"
+    exp_dir2 = tmp_path / "reports" / "phase2b" / "e3_augmented"
+    exp_dir1.mkdir(parents=True)
+    exp_dir2.mkdir(parents=True)
+
+    payload1 = {"model": "yolov8s.pt", "mAP50": 0.755, "per_class_ap": {"crazing": {"ap50": 0.419}}}
+    payload2 = {"model": "yolov8s.pt", "mAP50": 0.785, "per_class_ap": {"crazing": {"ap50": 0.510}}}
+
+    with open(exp_dir1 / "results.json", "w", encoding="utf-8") as f:
+        json.dump(payload1, f)
+    with open(exp_dir2 / "results.json", "w", encoding="utf-8") as f:
+        json.dump(payload2, f)
+
+    rows = build_comparison_table(tmp_path / "reports" / "phase2b")
+    assert len(rows) == 2
+    exp_names = {r["experiment"] for r in rows}
+    assert "e0_baseline" in exp_names
+    assert "e3_augmented" in exp_names
+
+
+def test_plot_per_class_comparison(tmp_path: Path) -> None:
+    """
+    Verifies that plot_per_class_comparison produces a valid PNG bar chart from comparison rows.
+
+    Inputs:
+        tmp_path (Path): Pytest temporary directory fixture.
+
+    Outputs:
+        None: Raises AssertionError if plot generation fails.
+    """
+    rows = [
+        {"experiment": "E0", "crazing_AP50": 0.419, "scratches_AP50": 0.952},
+        {"experiment": "E3", "crazing_AP50": 0.520, "scratches_AP50": 0.960},
+    ]
+    out_png = tmp_path / "plot.png"
+    result = plot_per_class_comparison(rows, output_png=out_png)
+    assert Path(result).is_file()
+    assert Path(result).stat().st_size > 1000
+
+
+def test_smoke_test_flag_changes_epochs() -> None:
+    """
+    Verifies that the smoke_test flag overrides config epochs to 1 for quick pipeline testing,
+    and preserves real configuration epochs when False.
+
+    Inputs:
+        None.
+
+    Outputs:
+        None: Raises AssertionError if epoch resolution is incorrect.
+    """
+    for cfg_path in [
+        "configs/baseline.yaml",
+        "configs/e1_imgsz320.yaml",
+        "configs/e2_yolov8m_640.yaml",
+        "configs/e3_augmented.yaml",
+    ]:
+        cfg = load_config(cfg_path)
+        assert cfg["epochs"] == 50
+
+        epochs_smoke = resolve_training_epochs(cfg, smoke_test=True)
+        assert epochs_smoke == 1
+
+        epochs_real = resolve_training_epochs(cfg, smoke_test=False)
+        assert epochs_real == 50
+        assert epochs_real == cfg["epochs"]
+
+
+def test_experiments_notebook_smoke_test_flag() -> None:
+    """
+    Verifies that notebooks/03_experiments.ipynb defines SMOKE_TEST = True at the top and forwards it.
+
+    Inputs:
+        None.
+
+    Outputs:
+        None: Raises AssertionError if SMOKE_TEST is not configured in the notebook.
+    """
+    import nbformat
+
+    with open("notebooks/03_experiments.ipynb", "r", encoding="utf-8") as f:
+        nb = nbformat.read(f, as_version=4)
+
+    found_smoke_declaration = False
+    found_smoke_usage = False
+
+    for cell in nb.cells:
+        if cell.cell_type == "code":
+            if "SMOKE_TEST = True" in cell.source:
+                found_smoke_declaration = True
+            if "smoke_test=SMOKE_TEST" in cell.source:
+                found_smoke_usage = True
+
+    assert found_smoke_declaration, "SMOKE_TEST = True declaration missing in notebooks/03_experiments.ipynb"
+    assert found_smoke_usage, "smoke_test=SMOKE_TEST usage missing in notebooks/03_experiments.ipynb"
+
+
+def test_cached_smoke_result_not_reused_when_smoke_test_false(tmp_path: Path) -> None:
+    """
+    Verifies that a cached 1-epoch smoke test result is NOT reused when running in real mode (SMOKE_TEST=False).
+
+    Inputs:
+        tmp_path (Path): Pytest temporary directory fixture.
+
+    Outputs:
+        None: Raises AssertionError if cache validation incorrectly accepts mismatched configs.
+    """
+    config = {
+        "model": "yolov8s.pt",
+        "imgsz": 640,
+        "seed": 42,
+        "epochs": 50,
+    }
+
+    # 1. Smoke test result (epochs=1, smoke_test=True)
+    smoke_file = tmp_path / "smoke_results.json"
+    smoke_payload = {
+        "model": "yolov8s.pt",
+        "imgsz": 640,
+        "seed": 42,
+        "epochs": 1,
+        "smoke_test": True,
+        "mAP50": 0.150,
+    }
+    with open(smoke_file, "w", encoding="utf-8") as f:
+        json.dump(smoke_payload, f)
+
+    # When SMOKE_TEST=False, the smoke-test cached result MUST NOT be reused
+    assert not is_cache_valid(smoke_file, config, smoke_test=False)
+
+    # When SMOKE_TEST=True, the smoke-test cached result CAN be reused
+    assert is_cache_valid(smoke_file, config, smoke_test=True)
+
+    # 2. Real training result (epochs=50, smoke_test=False)
+    real_file = tmp_path / "real_results.json"
+    real_payload = {
+        "model": "yolov8s.pt",
+        "imgsz": 640,
+        "seed": 42,
+        "epochs": 50,
+        "smoke_test": False,
+        "mAP50": 0.755,
+    }
+    with open(real_file, "w", encoding="utf-8") as f:
+        json.dump(real_payload, f)
+
+    # Real run matches real config
+    assert is_cache_valid(real_file, config, smoke_test=False)
+
+    # Real run does NOT match smoke test mode
+    assert not is_cache_valid(real_file, config, smoke_test=True)
+
+    # 3. Model, image size, or seed mismatch must also invalidate cache
+    assert not is_cache_valid(dict(real_payload, model="yolov8m.pt"), config, smoke_test=False)
+    assert not is_cache_valid(dict(real_payload, imgsz=320), config, smoke_test=False)
+    assert not is_cache_valid(dict(real_payload, seed=99), config, smoke_test=False)
+
+
+
 
 
 

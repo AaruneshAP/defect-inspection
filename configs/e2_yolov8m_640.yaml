@@ -1,0 +1,17 @@
+# Experiment 2 (E2): Increased model capacity (yolov8m.pt at 640x640) for feature expressiveness
+model: yolov8m.pt
+data: data/yolo/data.yaml
+epochs: 50
+imgsz: 640
+batch: 16
+seed: 42
+patience: 15
+optimizer: auto
+lr0: 0.001
+lrf: 0.01
+device: 0
+project: runs
+name: e2_yolov8m_640
+save: true
+plots: true
+

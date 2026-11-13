@@ -46,6 +46,8 @@ mlartifacts/
 *.sqlite
 *.db
 reports/phase2a/raw/
+reports/phase2b/raw/
+reports/phase2b_smoke/
 
 # OS & Editor specific
 .DS_Store
