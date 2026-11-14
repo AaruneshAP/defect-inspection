@@ -1,0 +1,16 @@
+# Drift monitoring (Phase 7a): the Evidently report in src/drift.py. Not part of the runtime, Docker, dev or dashboard requirements.
+# Evidently 0.7 pins plotly<6 (the dashboard needs plotly 7.1.0), so install this in its OWN environment, not .venv:
+#   python -m venv .venv-monitoring && .venv-monitoring/Scripts/pip install -r requirements.txt -r requirements-monitoring.txt -c constraints.txt
+# (constraints.txt pins plotly==7.1.0, so for this file drop the plotly line from a copy of the constraints.)
+evidently==0.7.23
+# Resolved with it, pinned:
+formulaic==1.2.2
+iterative-telemetry==0.0.10
+litestar==2.25.0
+markdown-it-py==4.3.0
+nltk==3.10.4
+rich==15.0.0
+rich-click==1.9.9
+statsmodels==0.15.0
+typer==0.29.1
+plotly==5.24.1  # evidently needs <6

@@ -1,12 +1,65 @@
 # Defect Inspection System
 
-An automated computer vision inspection system designed to detect, classify, and localize manufacturing surface defects on production lines.
+[![CI](https://github.com/AaruneshAP/defect-inspection/actions/workflows/ci.yml/badge.svg)](https://github.com/AaruneshAP/defect-inspection/actions/workflows/ci.yml)
+
+An end-to-end computer vision inspection system for detecting, classifying, and acting on manufacturing surface defects in hot-rolled steel strip (using the NEU-DET benchmark). The project covers dataset preparation, YOLOv8 fine-tuning, an asymmetric cost model with pre-registered evaluation, error analysis, robustness stress-testing, containerized FastAPI serving, lakehouse telemetry with Databricks Delta Lake, two-tier drift monitoring, automated promotion gating, and a public interactive demo.
+
+- **Live Web Demo:** <https://defect-inspection.streamlit.app/>
+- **Hugging Face Model Repo:** <https://huggingface.co/Aarun-1/defect-detector-neu-det>
 
 ---
 
-## Project Overview
+## Project Summary & Headline Findings
 
-In industrial manufacturing, manual visual inspection is slow, fatigue-prone, and inconsistent. The Defect Inspection System provides an end-to-end pipeline that takes raw camera images of manufactured components, detects visual flaws (scratches, dents, cracks, voids, discolorations), classifies defect types, and exposes inspection results through a low-latency API service.
+This project was built to test real-world ML engineering questions rather than chase benchmark tenths: does a cost-tuned decision policy beat a simple threshold? How fragile is the detector to realistic sensor corruptions? Can label-free telemetry catch performance drops before ground-truth labels arrive?
+
+Here is what the numbers actually show:
+
+1. **Detection Baseline (YOLOv8s on val, 216 images)**:
+   - Overall val mAP50 is **0.7545** (at standard conf 0.001) / **0.668** (at operating conf 0.25).
+   - Class performance is heavily skewed: scratches (0.952) and patches (0.877) are clean, while **crazing** (0.419) and **rolled-in scale** (0.622) are weak.
+   - Detailed error analysis revealed that crazing's low AP50 is mostly **bounding-box localization ambiguity, not missed defects**: relaxing the IoU threshold to 0.3 raises crazing AP to 0.688 (while AP75 collapses to 0.037). Out of 84 ground-truth crazing boxes on validation, only 4 were missed outright, but 37 had IoU between 0.15 and 0.50.
+2. **Decision Layer (Pre-registered on test, 360 images, 854 ground-truth defects)**:
+   - Missing a defect was modeled as costing 10× a false alarm (cost: miss 10, false alarm 1, human review 0.3) with a budget constraint ($\le 3$ alerts+reviews per image).
+   - We tested whether per-class confidence bands with a human-review option beat a single global threshold. **The pre-registered hypothesis was not supported**: the tuned per-class policy scored a total cost of 3052.7 vs 3041.9 for a single matched global threshold of 0.127—a relative saving of **-0.4% (95% bootstrap CI [-7.8%, +6.2%])**. The fancier policy offered no demonstrated advantage over a single flat cutoff tuned for the same workload.
+   - However, tuning the threshold away from the default naive 0.25 cutoff reduced test cost by **about 22%** (3041.9 vs 3901.0).
+3. **Robustness Stress-Testing (Synthetic corruptions on val)**:
+   - The detector is fragile to blur (mAP drops by 0.24 to 0.53), Gaussian noise (drops by 0.20 to 0.73), and JPEG compression, but practically invariant to brightness shifts (-0.006 mAP drop).
+   - Contrast shifts mildly affect mAP (-0.04) but push alert volumes around without changing ranking, demonstrating that a fixed confidence threshold is vulnerable to lighting shifts.
+4. **Drift Telemetry & Two-Tier Monitoring**:
+   - Streaming telemetry tracks both raw image statistics (`sharpness`, `noise_est`, `contrast_std`, `brightness_mean`) and model signals (`max_confidence`, `n_detections`).
+   - Drift detection uses two-sample Kolmogorov-Smirnov tests with Holm multiple-testing correction across all 6 features. Calibrated on seed 100 and evaluated on seed 200, it achieves a clean-stream false alarm rate of **0.32 episodes per 1,000 events**.
+   - A two-tier alerting scheme separates benign shifts from retrain-worthy degradation: brightness drift triggers tier 1 alerts in 99% of streams but 0% tier 2 triggers (it is harmless). Conversely, mild blur and contrast reveal the limits of label-free signals: blur 1 drops mAP by -0.24 yet never triggers tier 2, though tier 1 input alerts catch 100% of cases.
+5. **Promotion Gate**:
+   - Pre-committed rules ($\ge +0.010$ mAP gain, $\le 0.050$ class AP drop, paired bootstrap CI) evaluated against all Phase 2b experimental models (E1 imgsz 320, E2 YOLOv8m, E3 heavy augmentation) rejected all three against the baseline.
+6. **Deployment & Parity**:
+   - FastAPI + Docker serving with non-root execution and healthchecks.
+   - ONNX runtime backend verified to achieve exact numerical parity with PyTorch across all 216 validation images (identical detection counts, minimum box IoU 0.99999, maximum confidence difference $6 \times 10^{-6}$).
+
+---
+
+## Quick Links & How to Run
+
+- **Interactive Demo**: <https://defect-inspection.streamlit.app/> (hosted on Streamlit Community Cloud).
+- **Run the Streamlit Demo Locally**:
+  ```bash
+  pip install -r streamlit_app/requirements.txt
+  streamlit run streamlit_app/streamlit_app.py
+  ```
+- **Run the Monitoring Dashboard Locally**:
+  ```bash
+  pip install -r requirements-dashboard.txt
+  streamlit run app/dashboard.py
+  ```
+- **Run the FastAPI Service via Docker**:
+  ```bash
+  docker build -t defect-inspection:latest .
+  docker run -p 8000:8000 -v $(pwd)/models:/models -e MODEL_PATH=/models/best.pt defect-inspection:latest
+  ```
+- **Run the Hermetic Test Suite**:
+  ```bash
+  pytest
+  ```
 
 ---
 
@@ -323,59 +376,202 @@ Replaying 300 validation images (150 clean followed by 150 drifted across blur, 
 
 ---
 
+## Phase 7: Monitoring, Retrain Gate, and the Live Demo
+
+Phase 7 completes the production lifecycle: continuous drift detection with statistical multiple-testing correction, a two-tier operational alert system separating benign shifts from retrain-worthy failures, an automated model promotion gate, an ONNX runtime backend verified against PyTorch, and a public interactive web demo.
+
+### 1. Drift Detection & Statistical Testing
+To detect distribution shifts without ground-truth inspection labels, we monitor six streaming features:
+- **Raw Input Image Statistics**: `brightness_mean`, `contrast_std`, `sharpness` (variance of Laplacian), and `noise_est` (scaled median absolute deviation of Laplacian).
+- **Model Output Signals**: `max_confidence` and `n_detections`.
+
+**Statistical Framework (`src/drift.py`)**:
+- Compares a sliding window of recent traffic ($W = 30$ events) against a fixed clean reference window ($N = 200$ events) using two-sample **Kolmogorov-Smirnov (KS) tests**.
+- **Multiple Testing Control**: Testing 6 features simultaneously inflates false alarm rates. We apply the step-down **Holm-Bonferroni correction** to bound the Family-Wise Error Rate (FWER) at target significance $\alpha = 0.001$.
+- **Calibration & Holdout Evaluation**:
+  - Detection thresholds were calibrated on a synthetic stream with seed 100 and evaluated on a separate holdout stream with seed 200.
+  - On clean simulated traffic (20 independent streams, 15,420 sliding windows evaluated), the system achieved a low false alarm rate of **0.32 episodes per 1,000 events** (per-window false alarm rate: $0.0011$; 85% of clean streams completed without any false alarm).
+- **Detection Delays & Feature Responsiveness**:
+  - **Gaussian Blur**: Detected rapidly with a median delay of 16.5 events at mild blur ($\sigma = 1.0$) and 12.0 events at moderate/severe blur ($\sigma \in \{2.0, 3.0\}$; 90th percentile delay $\le 20$ events). Sharpness and noise estimate flag on 100% of windows. At severe blur, `max_confidence` also drops and flags on 87% of windows.
+  - **Gaussian Noise**: Detected in 25.0 events (mild $\sigma = 0.02$), 14.5 events (moderate $\sigma = 0.05$), and 11.0 events (severe $\sigma = 0.10$; 90th percentile delay $\le 42.2$ events). Sharpness and noise estimate fire immediately, while confidence collapses and detection counts plummet.
+  - **Contrast Shifts**: Detected with median delays of 26.0 events (mild $0.6\times$) and 50.0 events (severe $1.4\times$), driven by `contrast_std`.
+  - **Brightness Shifts**: Detected with median delays between 18.0 and 89.0 events across levels ($0.6\times$ to $1.4\times$), driven by `brightness_mean`.
+
+---
+
+### 2. Two-Tier Alerting & Empirical Findings
+Alert fatigue is a critical failure mode in industrial monitoring. If every lighting flicker pages an on-call engineer, alerts get silenced. We implemented a two-tier alerting policy (`src/triggers.py`):
+- **Tier 1 (Telemetry Alert)**: Informational alert indicating input sensor drift (fires when at least one input statistic passes the Holm-adjusted KS threshold). It signals camera issues (smudge, defocus, lighting fluctuation) without claiming the model is broken.
+- **Tier 2 (Retrain Recommended)**: High-severity trigger indicating both input drift and model output degradation ($k_1 \ge 1$ input features and prediction drift occurring within a rolling buffer of $m = 10$ windows).
+
+```text
+[Input Stream] ──> [Feature Extraction] ──> [Holm KS Test]
+                           │
+       ┌───────────────────┴───────────────────┐
+       ▼                                       ▼
+Input Statistic Drifts?               Prediction Statistic Drifts?
+(`sharpness`, `noise_est`, etc.)       (`max_confidence`, `n_detections`)
+       │                                       │
+       ├─ Yes ──> [Tier 1: Telemetry Alert]    │
+       │          (Check camera/lighting)      │
+       │                                       │
+       └──────────────┬────────────────────────┘
+                      ▼ Both within m=10 windows?
+             [Tier 2: Retrain Trigger]
+             (Model degradation suspected)
+```
+
+**Key Empirical Findings (`reports/phase7/triggers_summary.json`)**:
+1. **Brightness Drift is Harmless**: Brightness shifts ($0.6\times$ to $1.4\times$) trigger Tier 1 alerts in 99% of streams, but produce **0.0% Tier 2 triggers** across all 4 evaluated severities. Because the detector is invariant to brightness ($\Delta\text{mAP50} \le -0.014$), the two-tier filter successfully prevents false retrain alerts for benign optical shifts.
+2. **Limits of Label-Free Degradation Detection**:
+   - Mild blur ($\sigma = 1.0$) causes a large drop of **$-0.236$ mAP50**, yet triggers Tier 2 on **0.0% of streams** because confidence scores and detection counts do not shift enough to cross the Holm threshold.
+   - Moderate blur ($\sigma = 2.0$) drops mAP50 by **$-0.432$**, but triggers Tier 2 on only 50% of streams (median delay: 117 events).
+   - Contrast variations drop mAP50 mildly ($-0.043$ and $-0.025$) and trigger Tier 2 on only 30% and 13% of streams.
+   - **Conclusion**: Label-free prediction signals cannot reliably detect all model accuracy drops. However, **Tier 1 input alerts caught 100% of these corrupted streams**, demonstrating that monitoring raw sensor telemetry is essential when ground-truth labels are absent.
+3. **Multi-Feature Sensitivity Analysis**: An exploratory post-hoc check requiring at least 2 input features to flag ($k_1 = 2$) eliminated clean false alarms entirely (0.0 episodes/1,000 events) and reduced brightness alerts to 47%, but increased detection delays across all conditions. This is reported as an exploratory sensitivity analysis, not a production re-tuning.
+
+---
+
+### 3. Model Promotion Gate
+To prevent deploying worse or regressed models, candidate checkpoints are evaluated by an automated promotion gate (`src/promotion.py` using `configs/promotion.yaml`) before deployment.
+
+**Pre-Registered Promotion Rules**:
+1. **Minimum Overall Gain**: Must improve validation $\text{mAP50}$ by at least $+0.0100$ ($+1.0$ percentage point).
+2. **Maximum Per-Class Regression**: No individual defect class may drop by more than $0.0500$ ($5.0$ percentage points in $\text{AP50}$).
+3. **Paired Bootstrap Confidence Interval**: The 95% paired bootstrap confidence interval for $\Delta\text{mAP50}$ must strictly exclude zero.
+
+**Evaluation on Phase 2b Candidates against Baseline E0 (`reports/phase7/promotion_demo.json`)**:
+- **E1 (Lower Resolution, `imgsz=320`)**: **REJECTED**. Overall $\text{mAP50}$ gain was only $+0.0033$, falling short of the required $+0.0100$ threshold.
+- **E2 (Larger Backbone, `yolov8m-640`)**: **REJECTED**. Overall $\text{mAP50}$ dropped by $-0.0141$, and `crazing` $\text{AP50}$ collapsed by $0.0927$ (violating the $0.05$ class degradation limit).
+- **E3 (Aggressive Augmentation)**: **REJECTED**. Overall $\text{mAP50}$ dropped by $-0.0284$, with `crazing` dropping by $0.0792$ and `scratches` dropping by $0.0552$.
+- *Caveat*: The paired bootstrap CI rule could not be evaluated because Phase 2b runs only stored aggregated validation metrics, not per-image detection arrays.
+
+---
+
+### 4. ONNX Export and Numerical Parity
+For lightweight, production-grade serving without PyTorch dependencies, the model was exported to ONNX format (`models/best.onnx`, opset 17, dynamic batch size, fixed 640×640 input) and wrapped with letterbox preprocessing in `src/onnx_detector.py`.
+
+**Validation Split Parity Audit (`reports/phase7/onnx_parity.json`)**:
+We evaluated all 216 validation-split images across three operating confidence cutoffs ($0.001$, $0.127$, and $0.250$):
+- **Detection Count Parity**: Exactly 216 / 216 images had identical detection counts between PyTorch and ONNX (5,411 detections at conf 0.001; 645 at 0.127; 490 at 0.250). Zero unmatched detections.
+- **Bounding Box IoU**: The minimum bounding-box IoU across all matched detections was **0.99999** ($0.999988$ at conf 0.001; median IoU $> 0.999999$).
+- **Confidence Discrepancy**: The maximum absolute confidence difference across all detections was **$6.14 \times 10^{-6}$** ($\le 6 \times 10^{-6}$; median difference $\approx 3.0 \times 10^{-8}$).
+- **Inference Speed**: On CPU, ONNX Runtime reduced median per-image latency from $374.4\text{ ms}$ (PyTorch) to $308.5\text{ ms}$ (ONNX), roughly a 17–20% speedup.
+- *Scope Note*: Parity was verified on square 200×200 validation images; non-square aspect ratios rely on letterbox padding.
+
+---
+
+### 5. Interactive Web Demo & Artifact Sync
+- **Hosted Public Demo**: <https://defect-inspection.streamlit.app/> (deployed on Streamlit Community Cloud).
+  - Page 1 (**Try it**): Upload any steel surface image or pick a validation sample to see bounding boxes color-coded by action, tabular detection details, and the per-image decision under the frozen Phase 3 policy.
+  - Page 2 (**Monitoring**): Live telemetry viewer over simulated inspection streams with injected sensor drift.
+- **Hugging Face Model Repository**: <https://huggingface.co/Aarun-1/defect-detector-neu-det>.
+  - Hosts `best.pt`, `best.onnx`, `MODEL_CARD.md`, frozen policy configs (`policy/frozen.json`, `policy/cost.yaml`), and validation sample images.
+  - *Deployment Note*: A Hugging Face Space could not be deployed because Hugging Face now requires a paid PRO subscription for Gradio Spaces on free accounts. The public demo was deployed to Streamlit Community Cloud instead, which pulls the ONNX weights directly from the HF model repository.
+- **Model Sync Script**: `scripts/upload_model_repo.py` manages automated staging and uploading of weights, ONNX exports, model card documentation, and validation examples to Hugging Face.
+
+---
+
+### 6. Honest Limitations & Real-World Boundaries
+- **Synthetic Drift**: All drift experiments were simulated by abruptly injecting mathematical perturbations (Gaussian blur, Gaussian noise, contrast scaling). Real steel mill environmental drift is gradual, seasonal, and involves multi-source corruptions.
+- **Semi-Manual Retrain Loop**: The "retrain recommended" trigger alerts operators, but retraining requires collecting new imagery, manual defect labeling, and GPU compute. No automated retraining pipeline was executed.
+- **No Production Validation**: The entire system was trained and evaluated on a single lab dataset (NEU-DET). It has never seen production steel strip, differing camera resolutions, or factory lighting.
+- **Domain Specificity**: The model and demo are trained strictly on grayscale hot-rolled steel surface textures. Uploading general scenes or non-steel objects will produce meaningless detections.
+- **Free Cloud Infrastructure**: The public demo is hosted on Streamlit Community Cloud and may sleep when idle. First cold-start requests may experience a short delay while pulling the ONNX weights.
+
+---
+
 ## Architecture & Directory Structure
 
 ```text
 defect-inspection/
-├── data/                  # Raw and YOLO formatted imagery (ignored in git)
-│   ├── archive/           # Raw NEU-DET images and Pascal VOC XML annotations
-│   └── yolo/              # Processed YOLO dataset (images, labels, data.yaml)
-├── notebooks/             # Exploratory data analysis notebooks
-│   └── 01_eda.ipynb       # Executed EDA notebook with embedded visualizations
-├── reports/
-│   └── figures/           # Exported high-resolution figures from EDA
-├── src/                   # Production-grade core machine learning pipeline
-│   ├── __init__.py        # Package exports
-│   ├── data.py            # Dataset loading, VOC parsing, splitting, YOLO export
-│   ├── train.py           # Training loop orchestration, loss tracking, and checkpointing
-│   └── inference.py       # Model loading, single-sample and batch prediction engine
-├── app/                   # Serving layer and user interface / REST API
-│   ├── __init__.py        # Application package exports
-│   └── main.py            # API service endpoints (/health, /inspect)
-├── tests/                 # Automated test suite
-│   ├── __init__.py        # Tests package exports
-│   ├── test_data.py       # VOC parsing, YOLO coordinate bounds, and split tests
-│   └── test_train.py      # Configuration, metric parsing, and training safety tests
-├── scripts/
-│   ├── bootstrap.sh       # One-click environment provisioning script
-│   └── run_eda.py         # Headless EDA figure generation script
-├── requirements.txt       # Project dependencies
-├── .gitignore             # Ignored directories (data, models, internal learning notes)
-└── README.md              # Project documentation and developer guide
+├── .github/
+│   └── workflows/ci.yml       # GitHub Actions CI workflow (Ruff, Pytest, Docker build & smoke test)
+├── app/                       # FastAPI application and telemetry dashboard
+│   ├── main.py                # REST endpoints (/health, /model-info, /predict)
+│   ├── service.py             # Inference pipeline with pluggable PyTorch and ONNX backends
+│   ├── schemas.py             # Pydantic schemas for detections and decisions
+│   ├── dashboard.py           # Streamlit telemetry viewer (Parquet, SQLite, Delta sources)
+│   └── dashboard_view.py      # Plotly visual renderers for monitoring dashboard
+├── configs/                   # Model and pipeline configurations
+│   ├── baseline.yaml          # YOLOv8s baseline training configuration (Phase 2a)
+│   ├── cost.yaml              # Asymmetric cost matrix and maintenance actions (Phase 3)
+│   └── promotion.yaml         # Automated model promotion gate criteria (Phase 7)
+├── data/
+│   ├── sample/                # Committed synthetic inspection sample snapshot
+│   │   └── inspection_sample.parquet
+│   └── yolo/                  # Local converted YOLO dataset (git-ignored)
+├── models/                    # Model weights and exports (git-ignored)
+│   ├── best.pt                # YOLOv8s PyTorch weights (sha256: dff41d9a7f7b...)
+│   └── best.onnx              # Exported ONNX runtime model (opset 17, 640x640)
+├── reports/                   # Reproducible experiment reports and evaluations
+│   ├── phase2a/               # Baseline validation results
+│   ├── phase2b/               # Ablation and comparison experiments (E1-E3)
+│   ├── phase3/                # Pre-registered cost evaluation and frozen policy
+│   ├── phase4/                # Error analysis and synthetic robustness evaluations
+│   └── phase7/                # Drift detection, two-tier triggers, and ONNX parity benchmarks
+├── scripts/                   # Operations, automation, and utility scripts
+│   ├── bootstrap.sh           # Unix environment setup script
+│   ├── setup.ps1              # Windows setup script
+│   ├── run_eda.py             # Headless exploratory data analysis
+│   ├── backfill_mlflow.py     # MLflow tracking backfill for experiments E0-E3 and Phase 3
+│   ├── check_databricks.py    # Databricks SQL connection validator
+│   ├── create_dashboard.py    # Databricks AI/BI Lakeview dashboard publisher
+│   └── upload_model_repo.py   # Hugging Face model repository sync utility
+├── sql/
+│   └── dashboard_queries.sql  # Parameterized Databricks AI/BI queries
+├── src/                       # Core machine learning and inspection library
+│   ├── data.py                # Dataset parsing, VOC conversion, stratified splitting
+│   ├── train.py               # Ultralytics training orchestration and metric extraction
+│   ├── inference.py           # Model loading and batch inference
+│   ├── decision.py            # Asymmetric cost model and maintenance action routing
+│   ├── evaluate.py            # Pre-registered policy evaluation and bootstrap CI
+│   ├── analysis.py            # Per-class error breakdown and box IoU matching
+│   ├── perturb.py             # Synthetic sensor corruptions (blur, noise, contrast, brightness, JPEG)
+│   ├── robustness.py          # Paired bootstrap robustness evaluations
+│   ├── phase3c.py             # Grid search threshold optimization and bootstrap metrics
+│   ├── tracking.py            # MLflow experiment tracking and model registry integration
+│   ├── inspection_log.py      # Telemetry event schemas and pluggable sinks (Parquet, SQLite, Delta)
+│   ├── simulator.py           # High-throughput inspection stream simulator with drift injection
+│   ├── dashboard_data.py      # Telemetry aggregation and source loaders for dashboards
+│   ├── drift.py               # Kolmogorov-Smirnov drift detection with Holm FWER correction
+│   ├── triggers.py            # Two-tier operational alerting logic (input vs retrain trigger)
+│   ├── promotion.py           # Automated model promotion gate evaluation
+│   └── onnx_detector.py       # Standalone ONNX runtime detector with letterbox padding
+├── streamlit_app/             # Public interactive demo (Streamlit Community Cloud)
+│   ├── streamlit_app.py       # Multi-page demo entrypoint
+│   ├── try_it.py              # Page 1: interactive defect detection with frozen policy
+│   ├── monitoring.py          # Page 2: live telemetry and drift monitoring
+│   ├── core.py                # Standalone ONNX service loader and inference visualizers
+│   ├── requirements.txt       # Pinned lightweight requirements (no torch/ultralytics)
+│   └── README.md              # Demo documentation and NEU-DET data attribution
+├── tests/                     # Automated test suite (357 tests)
+├── Dockerfile                 # Distroless, non-root container definition
+├── MODEL_CARD.md              # Model card with specifications, metrics, and limitations
+├── requirements.txt           # Production API requirements
+├── requirements-dev.txt       # Development and testing requirements
+├── requirements-dashboard.txt # Lightweight monitoring dashboard dependencies
+└── README.md                  # System documentation and project guide
 ```
 
 ---
 
 ## Module Breakdown
 
-1. **`src/data.py`**
-   - **Purpose**: Ingests raw images and annotations, performs normalization/resizing, parses Pascal VOC XMLs, converts to YOLO format, produces stratified splits, and discovers Kaggle datasets.
-   - **Key Functions**: `parse_voc_xml`, `voc_to_yolo_bbox`, `scan_dataset`, `split_dataset`, `convert_dataset_to_yolo`, `load_dataset`, `preprocess_image`, `find_kaggle_dataset`.
-
-2. **`src/train.py`**
-   - **Purpose**: Coordinates YOLOv8s neural network training, validation metrics parsing, checkpoint preservation, and result exporting.
-   - **Key Functions**: `load_config`, `parse_training_metrics`, `evaluate`, `save_checkpoint`, `save_results`, `run_training`.
-
-3. **`src/inference.py`**
-   - **Purpose**: Executes optimized model inference on unseen images to produce defect verdicts and confidence scores.
-   - **Key Functions**: `load_model`, `predict`, `batch_predict`.
-
-4. **`app/main.py`**
-   - **Purpose**: Exposes HTTP endpoints for external inspection triggers and monitoring dashboards.
-   - **Key Functions**: `health_check`, `inspect_image`, `create_app`.
-
-5. **`tests/test_data.py` & `tests/test_train.py`**
-   - **Purpose**: Validates coordinate clamping within $[0.0, 1.0]$, split sizes, disjoint partitions, configuration validation, metric extraction, and evaluation split protection.
+1. **`src/data.py`**: Dataset ingestion, Pascal VOC XML parsing, bounding box normalization, class-stratified splitting, and Kaggle dataset discovery.
+2. **`src/train.py`**: Ultralytics YOLOv8 training loop orchestration, evaluation metric parsing, and checkpoint saving.
+3. **`src/inference.py`**: Model loading and batch prediction.
+4. **`src/decision.py` & `src/evaluate.py`**: Asymmetric cost model, severity-to-action mapping, pre-registered test evaluation, and bootstrap confidence intervals.
+5. **`src/analysis.py`**: Bounding box IoU matching, per-class error decomposition (matched, localized, missed, wrong class), and precision-recall analysis.
+6. **`src/perturb.py` & `src/robustness.py`**: Synthetic image corruptions and paired bootstrap robustness stress-testing.
+7. **`src/tracking.py`**: MLflow experiment logging, parameter tracking, metric aggregation, and model registry registration.
+8. **`src/inspection_log.py`**: Structured event logging and pluggable sinks (Parquet, SQLite, Delta Lake via Databricks).
+9. **`src/simulator.py`**: High-throughput simulated inspection stream with configurable drift injection schedules.
+10. **`src/drift.py` & `src/triggers.py`**: Two-sample KS drift detection with Holm correction and two-tier alerting rules.
+11. **`src/promotion.py`**: Model promotion gate evaluation against pre-committed quality and regression thresholds.
+12. **`src/onnx_detector.py`**: Standalone, CPU-optimized ONNX Runtime detection engine with letterboxing.
+13. **`app/main.py` & `app/service.py`**: Production-grade FastAPI service with healthcheck, metadata, and `/predict` endpoints.
+14. **`streamlit_app/`**: Hosted interactive web application on Streamlit Community Cloud.
 
 ---
 
@@ -383,32 +579,23 @@ defect-inspection/
 
 ### 1. Environment Setup
 
-Using the bootstrap script:
-```bash
-bash scripts/bootstrap.sh
+Using PowerShell on Windows:
+```powershell
+.\scripts\setup.ps1
 ```
 
-Or manually with Python:
+Or manually:
 ```bash
 python -m venv .venv
-# On Windows:
-.venv\Scripts\activate
-# On Linux/macOS:
-source .venv/bin/activate
-
+source .venv/bin/activate  # Or .venv\Scripts\activate on Windows
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 ### 2. Run Test Suite
 
 ```bash
-pytest tests/
-```
-
-Or with Python:
-```bash
-python -m pytest tests/
+pytest
 ```
 
 ---
@@ -422,4 +609,4 @@ python -m pytest tests/
 - [x] **Phase 4**: Robustness, explainability and error analysis.
 - [x] **Phase 5**: MLOps (MLflow, DVC, CI/CD, Docker, FastAPI).
 - [x] **Phase 6**: Data platform, simulator and live dashboard.
-- [ ] **Phase 7**: Drift monitoring, model card and demo.
+- [x] **Phase 7**: Drift monitoring, model card and demo.

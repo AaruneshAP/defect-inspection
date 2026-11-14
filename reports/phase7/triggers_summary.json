@@ -1,0 +1,222 @@
+{
+  "simulated": true,
+  "calibration_seed": 100,
+  "eval_seed": 200,
+  "chosen": {
+    "drift": {
+      "window": 30,
+      "alpha": 0.001,
+      "min_flagged": 1,
+      "ref_size": 200,
+      "correction": "holm"
+    },
+    "k": 1,
+    "m": 10
+  },
+  "max_fa_per_1000_calibration": 0.0,
+  "eval_setup": {
+    "drift_start": 400,
+    "horizon": 300,
+    "clean_events": 1000,
+    "n_clean": 20,
+    "n_drift_reps": 30
+  },
+  "tier2_clean": {
+    "episodes_per_1000": 0.0,
+    "window_rate": 0.0,
+    "streams_with_alert": 0.0
+  },
+  "tier2_by_condition": [
+    {
+      "perturbation": "blur",
+      "severity": 1,
+      "trigger_rate": 0.0,
+      "delay_median": NaN,
+      "delay_p90": NaN,
+      "delay_censored": 300.0,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    },
+    {
+      "perturbation": "blur",
+      "severity": 2,
+      "trigger_rate": 0.5,
+      "delay_median": 117.0,
+      "delay_p90": 262.4,
+      "delay_censored": 219.1,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    },
+    {
+      "perturbation": "blur",
+      "severity": 3,
+      "trigger_rate": 1.0,
+      "delay_median": 22.0,
+      "delay_p90": 32.800000000000026,
+      "delay_censored": 24.6,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    },
+    {
+      "perturbation": "noise",
+      "severity": 1,
+      "trigger_rate": 0.9333333333333333,
+      "delay_median": 34.0,
+      "delay_p90": 77.5,
+      "delay_censored": 61.36666666666667,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    },
+    {
+      "perturbation": "noise",
+      "severity": 2,
+      "trigger_rate": 1.0,
+      "delay_median": 18.5,
+      "delay_p90": 26.0,
+      "delay_censored": 19.7,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    },
+    {
+      "perturbation": "noise",
+      "severity": 3,
+      "trigger_rate": 1.0,
+      "delay_median": 15.0,
+      "delay_p90": 19.0,
+      "delay_censored": 15.566666666666666,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    },
+    {
+      "perturbation": "contrast",
+      "severity": 1,
+      "trigger_rate": 0.3,
+      "delay_median": 198.0,
+      "delay_p90": 250.8,
+      "delay_censored": 262.93333333333334,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    },
+    {
+      "perturbation": "contrast",
+      "severity": 2,
+      "trigger_rate": 0.13333333333333333,
+      "delay_median": 188.5,
+      "delay_p90": 241.10000000000002,
+      "delay_censored": 283.6666666666667,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    },
+    {
+      "perturbation": "brightness",
+      "severity": 1,
+      "trigger_rate": 0.0,
+      "delay_median": NaN,
+      "delay_p90": NaN,
+      "delay_censored": 300.0,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    },
+    {
+      "perturbation": "brightness",
+      "severity": 2,
+      "trigger_rate": 0.0,
+      "delay_median": NaN,
+      "delay_p90": NaN,
+      "delay_censored": 300.0,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    },
+    {
+      "perturbation": "brightness",
+      "severity": 3,
+      "trigger_rate": 0.0,
+      "delay_median": NaN,
+      "delay_p90": NaN,
+      "delay_censored": 300.0,
+      "n_streams": 30,
+      "tier1_alert_rate": 0.9666666666666667
+    },
+    {
+      "perturbation": "brightness",
+      "severity": 4,
+      "trigger_rate": 0.0,
+      "delay_median": NaN,
+      "delay_p90": NaN,
+      "delay_censored": 300.0,
+      "n_streams": 30,
+      "tier1_alert_rate": 1.0
+    }
+  ],
+  "tier1_comparison": [
+    {
+      "variant": "k1=1 (alpha .001)",
+      "alpha": 0.001,
+      "min_flagged": 1,
+      "fa_episodes_per_1000": 0.324254215304799,
+      "fa_streams_with_alert": 0.15,
+      "brightness_alert_rate": 0.9916666666666667,
+      "brightness_delay_median": 34.75,
+      "harmful_alert_rate": 1.0,
+      "harmful_delay_median": 15.5,
+      "delay_blur1": 16.5,
+      "delay_blur2": 12.0,
+      "delay_blur3": 12.0,
+      "delay_noise1": 25.0,
+      "delay_noise2": 14.5,
+      "delay_noise3": 11.0,
+      "delay_contrast1": 26.0,
+      "delay_contrast2": 50.0,
+      "delay_brightness1": 18.0,
+      "delay_brightness2": 46.0,
+      "delay_brightness3": 89.0,
+      "delay_brightness4": 23.5
+    },
+    {
+      "variant": "k1=2 (alpha .001)",
+      "alpha": 0.001,
+      "min_flagged": 2,
+      "fa_episodes_per_1000": 0.0,
+      "fa_streams_with_alert": 0.0,
+      "brightness_alert_rate": 0.4666666666666667,
+      "brightness_delay_median": 56.75,
+      "harmful_alert_rate": 0.925,
+      "harmful_delay_median": 17.25,
+      "delay_blur1": 19.5,
+      "delay_blur2": 13.0,
+      "delay_blur3": 12.0,
+      "delay_noise1": 26.0,
+      "delay_noise2": 15.0,
+      "delay_noise3": 12.0,
+      "delay_contrast1": 100.0,
+      "delay_contrast2": 67.0,
+      "delay_brightness1": 26.0,
+      "delay_brightness2": 192.0,
+      "delay_brightness3": 32.0,
+      "delay_brightness4": 81.5
+    },
+    {
+      "variant": "k1=2 (alpha .01)",
+      "alpha": 0.01,
+      "min_flagged": 2,
+      "fa_episodes_per_1000": 1.1673151750972763,
+      "fa_streams_with_alert": 0.25,
+      "brightness_alert_rate": 0.825,
+      "brightness_delay_median": 105.5,
+      "harmful_alert_rate": 0.9916666666666667,
+      "harmful_delay_median": 14.0,
+      "delay_blur1": 16.0,
+      "delay_blur2": 11.0,
+      "delay_blur3": 10.0,
+      "delay_noise1": 21.5,
+      "delay_noise2": 12.0,
+      "delay_noise3": 10.0,
+      "delay_contrast1": 29.0,
+      "delay_contrast2": 56.5,
+      "delay_brightness1": 23.0,
+      "delay_brightness2": 118.0,
+      "delay_brightness3": 182.5,
+      "delay_brightness4": 93.0
+    }
+  ]
+}

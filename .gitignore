@@ -60,3 +60,9 @@ Thumbs.db
 
 # Internal Learning Documentation (do not commit)
 LEARNING_NOTES.md
+
+# Phase 7: Evidently HTML reports are ~4 MB each; the JSON/CSV/PNG are kept
+reports/phase7/*.html
+
+# Phase 7c: staged Hugging Face upload folders (val images are not redistributed in git)
+build/

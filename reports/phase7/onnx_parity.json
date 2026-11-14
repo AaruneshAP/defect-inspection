@@ -1,0 +1,58 @@
+{
+  "n_images": 216,
+  "image_dir": "data/yolo/images/val",
+  "split": "val",
+  "latency_ms": {
+    "torch_median": 374.399549968075,
+    "torch_p95": 557.399199984502,
+    "onnx_median": 308.51670005358756,
+    "onnx_p95": 393.7547249952331
+  },
+  "by_conf_cutoff": {
+    "0.001": {
+      "n_images": 216,
+      "images_equal_count": 216,
+      "images_all_matched": 216,
+      "detections_a": 5411,
+      "detections_b": 5411,
+      "matched": 5411,
+      "unmatched_a": 0,
+      "unmatched_b": 0,
+      "iou_min": 0.9999882999499842,
+      "iou_median": 0.9999994347028716,
+      "conf_abs_diff_median": 3.073364496231079e-08,
+      "conf_abs_diff_p99": 1.1026859283447266e-06,
+      "conf_abs_diff_max": 6.139278411865234e-06
+    },
+    "0.127": {
+      "n_images": 216,
+      "images_equal_count": 216,
+      "images_all_matched": 216,
+      "detections_a": 645,
+      "detections_b": 645,
+      "matched": 645,
+      "unmatched_a": 0,
+      "unmatched_b": 0,
+      "iou_min": 0.9999913798855012,
+      "iou_median": 0.9999996899103696,
+      "conf_abs_diff_median": 2.980232238769531e-07,
+      "conf_abs_diff_p99": 2.6094913482666e-06,
+      "conf_abs_diff_max": 6.139278411865234e-06
+    },
+    "0.25": {
+      "n_images": 216,
+      "images_equal_count": 216,
+      "images_all_matched": 216,
+      "detections_a": 490,
+      "detections_b": 490,
+      "matched": 490,
+      "unmatched_a": 0,
+      "unmatched_b": 0,
+      "iou_min": 0.9999963257626157,
+      "iou_median": 0.9999997122442399,
+      "conf_abs_diff_median": 2.980232238769531e-07,
+      "conf_abs_diff_p99": 3.109276294708253e-06,
+      "conf_abs_diff_max": 6.139278411865234e-06
+    }
+  }
+}

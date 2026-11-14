@@ -55,14 +55,17 @@ class Settings:
     policy_key: str = "primary"
     max_upload_bytes: int = 10 * 1024 * 1024
     max_files: int = 8
+    backend: str = "torch"  # 'torch' (default) or 'onnx'
+    onnx_path: str = "models/best.onnx"
 
     @classmethod
     def from_env(cls) -> "Settings":
-        """Build settings from MODEL_PATH, FROZEN_PATH, COST_CONFIG, POLICY_KEY, MAX_UPLOAD_BYTES, MAX_FILES."""
+        """Build settings from MODEL_PATH, FROZEN_PATH, COST_CONFIG, POLICY_KEY, MAX_UPLOAD_BYTES, MAX_FILES,
+        DETECTOR_BACKEND, ONNX_PATH."""
         e, d = os.environ.get, cls()
         return cls(e("MODEL_PATH", d.model_path), e("FROZEN_PATH", d.frozen_path), e("COST_CONFIG", d.cost_path),
                    e("POLICY_KEY", d.policy_key), int(e("MAX_UPLOAD_BYTES", d.max_upload_bytes)),
-                   int(e("MAX_FILES", d.max_files)))
+                   int(e("MAX_FILES", d.max_files)), e("DETECTOR_BACKEND", d.backend), e("ONNX_PATH", d.onnx_path))
 
 
 def file_sha256(path: str) -> str:
@@ -105,10 +108,18 @@ class InspectionService:
         self.policy = PolicyInfo(name=settings.policy_key, reviewer_accuracy=entry["reviewer_accuracy"],
                                  budget=entry["budget"], bands=self.bands, source=settings.frozen_path)
         self.detector, self.version, self.registry = detector, version, None
-        if detector is None and Path(settings.model_path).is_file():
-            self.version = f"sha256:{file_sha256(settings.model_path)[:12]}"
+        if settings.backend not in ("torch", "onnx"):
+            raise ValueError(f"backend must be 'torch' or 'onnx', got {settings.backend!r}")
+        weights = settings.onnx_path if settings.backend == "onnx" else settings.model_path
+        if detector is None and Path(weights).is_file():
+            self.version = f"sha256:{file_sha256(weights)[:12]}"
             self.registry = registry_label()
-            self.detector = YoloDetector(settings.model_path)
+            if settings.backend == "onnx":
+                from src.onnx_detector import OnnxDetector
+
+                self.detector = OnnxDetector(weights)
+            else:
+                self.detector = YoloDetector(weights)
 
     @property
     def loaded(self) -> bool:

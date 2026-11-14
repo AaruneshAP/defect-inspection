@@ -1,0 +1,96 @@
+{
+  "rules": {
+    "min_map50_gain": 0.01,
+    "max_class_ap50_drop": 0.05,
+    "ci_required": true,
+    "n_boot": 2000,
+    "level": 0.95,
+    "seed": 0,
+    "ci_when_missing": "skip"
+  },
+  "current": "e0_baseline",
+  "data": "val metrics only; no per-image predictions",
+  "results": {
+    "e1_imgsz320": {
+      "decision": "reject",
+      "reasons": [
+        "mAP50 gain +0.0033 is below the required +0.0100"
+      ],
+      "checks": {
+        "map50_gain": {
+          "passed": false,
+          "value": 0.0033000000000000806,
+          "min": 0.01
+        },
+        "class_drop": {
+          "passed": true,
+          "worst": 0.0413,
+          "max": 0.05
+        },
+        "paired_ci": {
+          "passed": null,
+          "applied": false,
+          "note": "not applied: no per-image predictions available"
+        }
+      },
+      "action": "no change: gate rejected"
+    },
+    "e2_yolov8m_640": {
+      "decision": "reject",
+      "reasons": [
+        "mAP50 gain -0.0141 is below the required +0.0100",
+        "AP50 drop above 0.050 in: crazing (0.0927)"
+      ],
+      "checks": {
+        "map50_gain": {
+          "passed": false,
+          "value": -0.014100000000000001,
+          "min": 0.01
+        },
+        "class_drop": {
+          "passed": false,
+          "worst": 0.0927,
+          "classes": {
+            "crazing": 0.0927
+          },
+          "max": 0.05
+        },
+        "paired_ci": {
+          "passed": null,
+          "applied": false,
+          "note": "not applied: no per-image predictions available"
+        }
+      },
+      "action": "no change: gate rejected"
+    },
+    "e3_augmented": {
+      "decision": "reject",
+      "reasons": [
+        "mAP50 gain -0.0284 is below the required +0.0100",
+        "AP50 drop above 0.050 in: crazing (0.0792), scratches (0.0552)"
+      ],
+      "checks": {
+        "map50_gain": {
+          "passed": false,
+          "value": -0.02839999999999998,
+          "min": 0.01
+        },
+        "class_drop": {
+          "passed": false,
+          "worst": 0.07919999999999999,
+          "classes": {
+            "crazing": 0.07919999999999999,
+            "scratches": 0.05520000000000003
+          },
+          "max": 0.05
+        },
+        "paired_ci": {
+          "passed": null,
+          "applied": false,
+          "note": "not applied: no per-image predictions available"
+        }
+      },
+      "action": "no change: gate rejected"
+    }
+  }
+}

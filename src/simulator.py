@@ -25,6 +25,7 @@ from src.inspection_log import DELTA_TABLE, STAT_COLUMNS, Sink, event_from_resul
 from src.perturb import LEVELS, apply_perturbation, image_seed
 
 DEFAULT_KINDS = ("blur", "noise", "contrast")
+BRIGHTNESS_KIND = "brightness"  # opt-in: the model is robust to it, so it is drift that does not hurt
 START_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _NAMESPACE = uuid.UUID("6f0c1c6e-5a52-4d1b-9a53-0d3a5f9f1a11")
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
@@ -180,6 +181,8 @@ def main() -> None:
     ap.add_argument("--drift-start", type=int, default=None, help="event index where drift begins (default: none)")
     ap.add_argument("--drift-ramp", type=int, default=100, help="events over which severity ramps up")
     ap.add_argument("--kinds", default=",".join(DEFAULT_KINDS), help="comma-separated perturbations")
+    ap.add_argument("--with-brightness", action="store_true",
+                    help="also draw brightness drift (default off; the model is robust to it)")
     ap.add_argument("--image-dir", default="data/yolo/images/val")
     ap.add_argument("--sink", choices=["parquet", "sqlite", "delta"], default="parquet")
     ap.add_argument("--out", default=None, help="local sinks; default: data/inspection/sim.parquet or sim.sqlite")
@@ -212,7 +215,10 @@ def main() -> None:
         if not service.loaded:
             ap.error(f"no weights at {service.settings.model_path}")
         backend = ServiceBackend(service)
-    drift = (DriftSchedule(a.drift_start, a.drift_ramp, tuple(a.kinds.split(",")))
+    kinds = tuple(a.kinds.split(","))
+    if a.with_brightness and BRIGHTNESS_KIND not in kinds:
+        kinds += (BRIGHTNESS_KIND,)
+    drift = (DriftSchedule(a.drift_start, a.drift_ramp, kinds)
              if a.drift_start is not None else None)
     cfg = SimConfig(a.n_events, a.seed, a.rate, drift, realtime=a.realtime)
 

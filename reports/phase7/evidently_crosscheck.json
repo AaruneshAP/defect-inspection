@@ -1,0 +1,40 @@
+{
+  "blur": {
+    "own_p": {
+      "brightness_mean": 0.3561089586590619,
+      "contrast_std": 0.9302395499529333,
+      "sharpness": 2.338693018854112e-24,
+      "noise_est": 1.1090142846550582e-20,
+      "max_confidence": 0.5221712791025903,
+      "n_detections": 0.5221712791025903
+    },
+    "evidently_p": {
+      "brightness_mean": 0.34882253663807494,
+      "contrast_std": 0.9164964457977643,
+      "sharpness": 5.392573325959144e-38,
+      "noise_est": 5.508491835700998e-26,
+      "max_confidence": 0.5094933361890721,
+      "n_detections": 0.5094933361890721
+    },
+    "flags_agree_at_raw_alpha": true
+  },
+  "brightness": {
+    "own_p": {
+      "brightness_mean": 0.0030197592740651225,
+      "contrast_std": 0.00668025991676477,
+      "sharpness": 0.06996465576995542,
+      "noise_est": 0.06996465576995542,
+      "max_confidence": 0.7114402861317312,
+      "n_detections": 0.8474609918821628
+    },
+    "evidently_p": {
+      "brightness_mean": 0.0030773583918365147,
+      "contrast_std": 0.006817629867376817,
+      "sharpness": 0.07017242453597647,
+      "noise_est": 0.07017242453597647,
+      "max_confidence": 0.6938229472582891,
+      "n_detections": 0.8301303298832134
+    },
+    "flags_agree_at_raw_alpha": true
+  }
+}

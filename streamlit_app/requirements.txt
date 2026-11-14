@@ -1,0 +1,14 @@
+# Streamlit Community Cloud installs THIS file (the entrypoint folder's requirements win over the repo root's).
+# No torch or ultralytics: inference uses onnxruntime. Pinned to the versions tested locally on Python 3.13.
+streamlit==1.67.0
+plotly==7.1.0
+pandas==2.3.2
+pyarrow==21.0.0
+numpy==2.1.3
+pillow==11.3.0
+onnxruntime==1.32.0
+opencv-python-headless==5.0.0.93
+huggingface_hub==2.4.0
+# imported by app/service.py and src/decision.py (not in the list above, but required there)
+pydantic==2.14.3
+PyYAML==6.0.3

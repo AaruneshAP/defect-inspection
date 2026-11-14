@@ -1,0 +1,4 @@
+variant,alpha,min_flagged,fa_episodes_per_1000,fa_streams_with_alert,brightness_alert_rate,brightness_delay_median,harmful_alert_rate,harmful_delay_median,delay_blur1,delay_blur2,delay_blur3,delay_noise1,delay_noise2,delay_noise3,delay_contrast1,delay_contrast2,delay_brightness1,delay_brightness2,delay_brightness3,delay_brightness4
+k1=1 (alpha .001),0.001,1,0.324254215304799,0.15,0.9916666666666667,34.75,1.0,15.5,16.5,12.0,12.0,25.0,14.5,11.0,26.0,50.0,18.0,46.0,89.0,23.5
+k1=2 (alpha .001),0.001,2,0.0,0.0,0.4666666666666667,56.75,0.925,17.25,19.5,13.0,12.0,26.0,15.0,12.0,100.0,67.0,26.0,192.0,32.0,81.5
+k1=2 (alpha .01),0.01,2,1.1673151750972763,0.25,0.825,105.5,0.9916666666666667,14.0,16.0,11.0,10.0,21.5,12.0,10.0,29.0,56.5,23.0,118.0,182.5,93.0

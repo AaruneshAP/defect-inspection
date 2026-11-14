@@ -1,0 +1,18 @@
+# Phase 7b promotion gate. Rule values fixed BEFORE the gate was run on any candidate; do not change them after seeing results.
+# Round numbers chosen from the size of the val set (216 images, so per-class AP50 is noisy), not fitted to any experiment.
+# (The Phase 2b comparison table had been seen earlier, in Phase 2b; the values were not set to produce an outcome.)
+# Evaluation data: the val split only (the test split is spent).
+model_name: defect-detector
+alias: production
+
+rules:
+  min_map50_gain: 0.01       # candidate mAP50 - current mAP50 must be at least this
+  max_class_ap50_drop: 0.05  # no class may lose more than this much AP50
+  ci:
+    # Paired bootstrap over images of the per-image score difference; the CI must exclude zero (lower bound > 0).
+    required_when_available: true
+    n_boot: 2000
+    level: 0.95
+    seed: 0
+    # Without per-image predictions the CI cannot be computed: 'skip' records it as not applied, 'reject' fails the gate.
+    when_missing: skip
