@@ -5,3 +5,5 @@ nbformat==5.11.1
 ruff==0.17.5
 mlflow==3.18.0
 httpx==0.28.1
+databricks-sql-connector==4.9.0
+databricks-sdk==0.166.0

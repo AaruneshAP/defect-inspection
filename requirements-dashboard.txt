@@ -1,0 +1,6 @@
+# Monitoring page (Phase 6c): streamlit run app/dashboard.py. Not part of the runtime or Docker requirements.
+streamlit==1.67.0
+plotly==7.1.0
+pandas==2.3.2
+pyarrow==21.0.0
+databricks-sql-connector==4.9.0

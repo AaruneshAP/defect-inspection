@@ -253,6 +253,76 @@ Phase 5 establishes reproducible environments, experiment tracking, model regist
 
 ---
 
+## Phase 6: Simulated Inspection Stream and Monitoring
+
+Phase 6 implements an end-to-end telemetry and monitoring pipeline for line-side defect inspection, including a traffic simulator with controlled drift injection, multi-sink event logging (Parquet, SQLite, Delta Lake), an AI/BI Lakeview dashboard on Databricks, and a lightweight standalone Streamlit monitoring application.
+
+![Databricks AI/BI Dashboard](docs/images/databricks_dashboard.png)
+*Figure: Databricks AI/BI Lakeview monitoring dashboard over the Delta Lake inspection event stream.*
+
+![Streamlit Monitoring Dashboard](docs/images/streamlit_dashboard.png)
+*Figure: Streamlit monitoring application displaying simulated inspection traffic and input statistics.*
+
+### 1. Telemetry Architecture, Event Schema & Sinks
+- **Canonical Event Schema (`src/inspection_log.py`)**:
+  - Each inspection produces a structured record (`InspectionEvent`): `event_id`, `timestamp` (UTC), `image_id`, `model_version`, `n_detections`, `worst_decision` (`stop_now`, `schedule_service`, `human_review`, `monitor`, `ignore`), `max_confidence`, per-action detection counts (`n_stop_now`, `n_schedule_service`, `n_human_review`, `n_monitor`, `n_ignore`), `latency_ms`, `perturbation`, `severity`, `simulated`, and Schema v2 input image statistics (`brightness_mean`, `contrast_std`, `sharpness`, `noise_est`).
+- **Pluggable Sinks (`Sink` Protocol)**:
+  - **ParquetSink**: Local partitioned Parquet files (`data/inspection/sim.parquet/part-*.parquet`).
+  - **SQLiteSink**: Local relational SQLite database (`data/inspection/sim.sqlite`).
+  - **DeltaSink**: Databricks Unity Catalog / Delta Lake table (`defect_inspection.inspection_events`) via `databricks-sql-connector`. Writes are idempotent by `event_id` via SQL `MERGE ... WHEN NOT MATCHED`, batched into parameterized statements.
+  - A committed sample snapshot (`data/sample/inspection_sample.parquet`, 300 simulated events) allows testing and local dashboard usage out-of-the-box.
+- **Inspection Stream Simulator (`src/simulator.py`)**:
+  - Replays validation images (refuses the spent test split) at a configurable simulated clock rate (`--rate`, default 5.0 Hz).
+  - Can call the in-process `InspectionService` (`ServiceBackend`) or post multipart images over HTTP (`HttpBackend`).
+  - **Drift Schedule (`DriftSchedule`)**: Simulates operational drift starting at a designated event index (`--drift-start 150`, ramp over 100 events). Randomly injects synthetic perturbations (blur, Gaussian noise, contrast variations) at escalating severity levels to evaluate detector degradation and telemetry responsiveness.
+
+### 2. Monitoring Dashboards & Running Streamlit
+- **Databricks AI/BI Lakeview Dashboard**:
+  - Defined declaratively in `sql/dashboard_queries.sql` and managed programmatically via Databricks SDK in `scripts/create_dashboard.py`.
+  - Creates, updates, and publishes the dashboard with parameterized time bucketing (`:bucket_seconds`).
+  - Displays KPI counters, event volumes, mean max confidence, mean detection counts, p50/p95 latency percentiles, decision distributions, and input image statistics.
+- **Streamlit Monitoring Application (`app/dashboard.py`)**:
+  - Standalone monitoring UI built with pure Pandas and Plotly (`src/dashboard_data.py`), with no runtime dependency on PyTorch or Ultralytics.
+  - Supports three data sources:
+    1. **Sample snapshot** (`data/sample/inspection_sample.parquet`): Zero-setup evaluation mode.
+    2. **Local file**: Direct ingestion of local Parquet or SQLite sink outputs.
+    3. **Delta (Databricks)**: Live query against `defect_inspection.inspection_events` using credentials in a git-ignored `.env`.
+- **How to Run the Streamlit Dashboard**:
+  ```bash
+  # Install dashboard dependencies (lightweight, no torch/ultralytics)
+  pip install -r requirements-dashboard.txt
+
+  # Launch the Streamlit dashboard
+  streamlit run app/dashboard.py
+  ```
+
+### 3. Empirical Findings: Telemetry Under Drift
+Replaying 300 validation images (150 clean followed by 150 drifted across blur, Gaussian noise, and contrast) revealed clear telemetry patterns:
+- **Sharpness Collapse Under Blur**:
+  - Clean validation images exhibit high baseline sharpness ($\approx 880$ variance of Laplacian). Gaussian blur causes sharpness to plummet to $7.7$ (a $>99\%$ drop), providing an immediate, unambiguous camera defocus or smudge indicator.
+- **Noise Estimate Spikes**:
+  - Clean hot-rolled steel grain produces a high baseline noise estimate ($\text{noise\_est} \approx 22.7$, scaled median absolute deviation of Laplacian). Sensor noise sharply elevates this estimate to $60.0$ ($+164\%$).
+  - Notably, sensor noise also inflates measured sharpness ($\approx 4,265$) because the Laplacian variance responds to high-frequency pixel artifacts as edge energy.
+- **Contrast Shifts**:
+  - Contrast perturbations shift `contrast_std` in a level-dependent manner (mean $32.1$ vs $28.8$ clean).
+- **Max Confidence Misses Contrast Drift**:
+  - While mean maximum confidence drops noticeably under severe blur ($0.707 \rightarrow 0.570$) and noise ($0.707 \rightarrow 0.626$), it fails to detect contrast drift ($0.723$ vs $0.707$ clean).
+  - This demonstrates that **output-confidence monitoring alone is blind to lighting/contrast shifts**, underscoring the necessity of tracking raw input image statistics alongside model predictions.
+
+### 4. Honest Limitations & Design Boundaries
+- **Simulated Stream & Injected Drift**:
+  - All streaming data and perturbations are generated synthetically by the simulator (`simulated = TRUE`). Detecting these shifts confirms that the logging pipeline and statistical metrics function correctly, not that real-world steel mill environmental drift is automatically detected.
+- **Class Skew & Roll-up Heuristic**:
+  - The NEU-DET dataset consists exclusively of defective steel coupons (no defect-free benign production images). Consequently, $\approx 78\text{--}80\%$ of inspected images produce a rolled-up decision of `stop_now`. The per-image roll-up heuristic ("most urgent action wins") remains unevaluated against factory operational costs.
+- **Texture Baselines**:
+  - `noise_est` has a high clean baseline ($\approx 22.7$) due to hot-rolled steel surface textures, and Gaussian noise also elevates Laplacian sharpness.
+- **Dashboard Accessibility**:
+  - The Databricks Lakeview dashboard is hosted within the private workspace and requires workspace permissions. The committed dashboard screenshots and the local Streamlit application serve as the public, portable views.
+- **Credential Protection**:
+  - Databricks connection parameters (`DATABRICKS_SERVER_HOSTNAME`, `DATABRICKS_HTTP_PATH`, `DATABRICKS_TOKEN`) are loaded from a git-ignored `.env` file (based on `.env.example`). The token is strictly scrubbed from connection error logs and never committed.
+
+---
+
 ## Architecture & Directory Structure
 
 ```text
@@ -351,5 +421,5 @@ python -m pytest tests/
 - [x] **Phase 3**: Decision layer (severity, cost model, thresholds).
 - [x] **Phase 4**: Robustness, explainability and error analysis.
 - [x] **Phase 5**: MLOps (MLflow, DVC, CI/CD, Docker, FastAPI).
-- [ ] **Phase 6**: Data platform, simulator and live dashboard.
+- [x] **Phase 6**: Data platform, simulator and live dashboard.
 - [ ] **Phase 7**: Drift monitoring, model card and demo.

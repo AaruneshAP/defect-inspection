@@ -16,10 +16,13 @@ htmlcov/
 .ipynb_checkpoints/
 
 # Data & Datasets
-data/
+data/*
+!data/sample/
+data/sample/*
 *.csv
 !reports/**/*.csv
 *.parquet
+!data/sample/inspection_sample.parquet
 *.jsonl
 *.zip
 *.tar.gz

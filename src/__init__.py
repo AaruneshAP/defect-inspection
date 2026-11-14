@@ -6,9 +6,17 @@ Inputs: None.
 Outputs: Exported core submodules for data processing, training, and inference.
 """
 
-from . import data
-from . import inference
-from . import train
+"""Package initialization for defect inspection core modules."""
 
 __all__ = ["data", "train", "inference"]
+
+
+def __getattr__(name: str):
+    if name in ("data", "train", "inference"):
+        import importlib
+
+        mod = importlib.import_module(f".{name}", __name__)
+        globals()[name] = mod
+        return mod
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
