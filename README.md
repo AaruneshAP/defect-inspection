@@ -20,7 +20,7 @@ Here is what the numbers actually show:
    - Class performance is heavily skewed: scratches (0.952) and patches (0.877) are clean, while **crazing** (0.419) and **rolled-in scale** (0.622) are weak.
    - Detailed error analysis revealed that crazing's low AP50 is mostly **bounding-box localization ambiguity, not missed defects**: relaxing the IoU threshold to 0.3 raises crazing AP to 0.688 (while AP75 collapses to 0.037). Out of 84 ground-truth crazing boxes on validation, only 4 were missed outright, but 37 had IoU between 0.15 and 0.50.
 2. **Decision Layer (Pre-registered on test, 360 images, 854 ground-truth defects)**:
-   - Missing a defect was modeled as costing 10× a false alarm (cost: miss 10, false alarm 1, human review 0.3) with a budget constraint ($\le 3$ alerts+reviews per image).
+   - Missing a defect was modeled as costing 10× a false alarm (cost: miss 10, false alarm 1, human review 0.3) with a budget constraint (at most 3 alerts+reviews per image).
    - We tested whether per-class confidence bands with a human-review option beat a single global threshold. **The pre-registered hypothesis was not supported**: the tuned per-class policy scored a total cost of 3052.7 vs 3041.9 for a single matched global threshold of 0.127—a relative saving of **-0.4% (95% bootstrap CI [-7.8%, +6.2%])**. The fancier policy offered no demonstrated advantage over a single flat cutoff tuned for the same workload.
    - However, tuning the threshold away from the default naive 0.25 cutoff reduced test cost by **about 22%** (3041.9 vs 3901.0).
 3. **Robustness Stress-Testing (Synthetic corruptions on val)**:
@@ -31,10 +31,10 @@ Here is what the numbers actually show:
    - Drift detection uses two-sample Kolmogorov-Smirnov tests with Holm multiple-testing correction across all 6 features. Calibrated on seed 100 and evaluated on seed 200, it achieves a clean-stream false alarm rate of **0.32 episodes per 1,000 events**.
    - A two-tier alerting scheme separates benign shifts from retrain-worthy degradation: brightness drift triggers tier 1 alerts in 99% of streams but 0% tier 2 triggers (it is harmless). Conversely, mild blur and contrast reveal the limits of label-free signals: blur 1 drops mAP by -0.24 yet never triggers tier 2, though tier 1 input alerts catch 100% of cases.
 5. **Promotion Gate**:
-   - Pre-committed rules ($\ge +0.010$ mAP gain, $\le 0.050$ class AP drop, paired bootstrap CI) evaluated against all Phase 2b experimental models (E1 imgsz 320, E2 YOLOv8m, E3 heavy augmentation) rejected all three against the baseline.
+   - Pre-committed rules (at least +0.010 mAP gain, at most 0.050 class AP drop, paired bootstrap CI) evaluated against all Phase 2b experimental models (E1 imgsz 320, E2 YOLOv8m, E3 heavy augmentation) rejected all three against the baseline.
 6. **Deployment & Parity**:
    - FastAPI + Docker serving with non-root execution and healthchecks.
-   - ONNX runtime backend verified to achieve exact numerical parity with PyTorch across all 216 validation images (identical detection counts, minimum box IoU 0.99999, maximum confidence difference $6 \times 10^{-6}$).
+   - ONNX runtime backend verified to achieve exact numerical parity with PyTorch across all 216 validation images (identical detection counts, minimum box IoU 0.99999, maximum confidence difference 6e-6).
 
 ---
 
@@ -170,25 +170,27 @@ Phase 3 implements an operational decision layer that maps raw bounding box dete
 
 1. **Cost Model Formulation**:
    - Total industrial cost evaluates missed flaws, false alarms, and inspection overhead:
-     $$\text{Total Cost} = \sum_{\text{missed defects}} (\text{cost\_miss} \times \text{severity}) + \sum_{\text{false alarms}} \text{cost\_false\_alarm} + \sum_{\text{reviewed boxes}} \text{cost\_review}$$
-   - **Baseline Cost Weights** (`configs/cost.yaml`): $\text{cost\_miss} = 10$, $\text{cost\_false\_alarm} = 1$, $\text{cost\_review} = 0.3$.
-   - **Matching Protocol**: Class-aware greedy matching at $\text{IoU} \ge 0.5$, sorted by confidence descending. Duplicate detections matching an already-claimed ground truth count as false alarms.
+     ```text
+     Total Cost = sum(missed defects * severity * cost_miss) + sum(false alarms * cost_false_alarm) + sum(reviewed boxes * cost_review)
+     ```
+   - **Baseline Cost Weights** (`configs/cost.yaml`): `cost_miss = 10`, `cost_false_alarm = 1`, `cost_review = 0.3`.
+   - **Matching Protocol**: Class-aware greedy matching at IoU >= 0.5, sorted by confidence descending. Duplicate detections matching an already-claimed ground truth count as false alarms.
 2. **Severity-to-Action Mapping**:
-   - Defect severity is computed as $\text{severity} = \text{class\_weight} \times \text{area\_factor}$, where area factor scales linearly with box area fraction from $0.4$ (small defect, $\le 2\%$ image area) to $2.0$ (large defect, $\ge 20\%$ image area).
+   - Defect severity is computed as `severity = class_weight * area_factor`, where area factor scales linearly with box area fraction from 0.4 (small defect, <= 2% image area) to 2.0 (large defect, >= 20% image area).
    - If detection confidence falls in a review band, action is `human_review`.
    - If detection confidence meets the alert threshold, severity triggers automated factory responses:
-     - $\text{severity} < 0.5$: `ignore` (minor surface blemish)
-     - $0.5 \le \text{severity} < 0.8$: `monitor` (log defect trend)
-     - $0.8 \le \text{severity} < 1.3$: `schedule_service` (flag roll inspection)
-     - $\text{severity} \ge 1.3$: `stop_now` (immediate line emergency halt)
+     - `severity < 0.5`: `ignore` (minor surface blemish)
+     - `0.5 <= severity < 0.8`: `monitor` (log defect trend)
+     - `0.8 <= severity < 1.3`: `schedule_service` (flag roll inspection)
+     - `severity >= 1.3`: `stop_now` (immediate line emergency halt)
 3. **Optional Review Band & Workload Budget**:
-   - Per-class confidence band $[\text{lower}, \text{upper})$: detections with $\text{conf} \ge \text{upper}$ alert directly; $\text{lower} \le \text{conf} < \text{upper}$ route to a human inspector; $\text{conf} < \text{lower}$ are ignored.
-   - Reviewer accuracy $a$: symmetric model where a human reviewer correctly verifies defects with probability $a$ ($a=0.9$ primary, $a=1.0$ and $a=0.8$ secondary).
-   - Workload constraint: average inspection budget $B \le 3$ (combined alerts + reviews per image $\le 3$ on validation set).
+   - Per-class confidence band `[lower, upper)`: detections with `conf >= upper` alert directly; `lower <= conf < upper` route to a human inspector; `conf < lower` are ignored.
+   - Reviewer accuracy `a`: symmetric model where a human reviewer correctly verifies defects with probability `a` (`a = 0.9` primary, `a = 1.0` and `a = 0.8` secondary).
+   - Workload constraint: average inspection budget `B <= 3` (combined alerts + reviews per image <= 3 on validation set).
 
 ### Pre-Registered Primary Outcome (Not Supported on Val and Test)
 
-Prior to running on the test set (`reports/phase3/preregistration.md`), we pre-registered the primary hypothesis: *a tuned per-class review band policy ($a=0.9, B \le 3$) delivers statistically significant cost savings over a matched flat alerting baseline ($0.127$).* The pre-registered success criterion required the 95% bootstrap confidence interval of cost saving to lie strictly above zero.
+Prior to running on the test set (`reports/phase3/preregistration.md`), we pre-registered the primary hypothesis: *a tuned per-class review band policy (a = 0.9, B <= 3) delivers statistically significant cost savings over a matched flat alerting baseline (0.127).* The pre-registered success criterion required the 95% bootstrap confidence interval of cost saving to lie strictly above zero.
 
 - **Validation Split (216 images)**:
   - Primary policy cost: **1610.7** vs matched flat cost: **1688.1**.
@@ -221,12 +223,12 @@ Prior to running on the test set (`reports/phase3/preregistration.md`), we pre-r
 
 ### Secondary Result & Caveats
 
-- **Infallible Reviewer Scenario ($a=1.0$)**:
-  - If human review is assumed to be 100% accurate ($a=1.0$), the policy achieves a test cost of **2791.3**, saving **250.6** (**8.2%**, 95% CI `[28.5, 465.2]`, `[1.0%, 14.9%]`) over matched flat alerting.
+- **Infallible Reviewer Scenario (a = 1.0)**:
+  - If human review is assumed to be 100% accurate (a = 1.0), the policy achieves a test cost of **2791.3**, saving **250.6** (**8.2%**, 95% CI `[28.5, 465.2]`, `[1.0%, 14.9%]`) over matched flat alerting.
 - **Caveats**:
-  - This benefit is brittle and depends entirely on the unrealistic assumption of perfect human inspection ($a=1.0$).
-  - Once human error is modeled ($a=0.9$), the advantage drops to **−0.4%** (`[-7.8%, 6.2%]`).
-  - At $a=0.8$, the policy barely utilizes review (only **0.064** reviews/image, test cost **3065.7**, saving **−0.8%**, 95% CI `[-8.3%, 6.0%]`) because human errors incur expensive false alarm and miss penalties that outweigh the review band's utility.
+  - This benefit is brittle and depends entirely on the unrealistic assumption of perfect human inspection (a = 1.0).
+  - Once human error is modeled (a = 0.9), the advantage drops to **−0.4%** (`[-7.8%, 6.2%]`).
+  - At a = 0.8, the policy barely utilizes review (only **0.064** reviews/image, test cost **3065.7**, saving **−0.8%**, 95% CI `[-8.3%, 6.0%]`) because human errors incur expensive false alarm and miss penalties that outweigh the review band's utility.
 
 ### Sensitivity Summary
 
@@ -262,17 +264,17 @@ We evaluated baseline model stability under 5 synthetic perturbation families (G
 - **Evaluation Settings**: mAP50 uses all detections down to confidence floor 0.001. Recall and alerts per image use the operational 0.127 threshold.
 - **Clean Baseline Note**: Clean mAP50 is **0.760** (0.7599) in this single-image evaluation pipeline versus **0.7545** from Ultralytics `model.val` in Phase 2a. The 0.004 gap is unexplained and small (batched val letterboxing differences vs single-image predict, plus 494 vs 495 ground truth boxes parsed), and all robustness deltas are measured against the same cached clean run.
 - **Fragile to Blur, Noise, and JPEG**:
-  - The model degrades under Gaussian blur ($\Delta \text{mAP50} = -0.236$ at $\sigma=1.0$, 95% CI `[-0.274, -0.195]`), additive noise ($\Delta \text{mAP50} = -0.203$ at $\sigma=0.02$, 95% CI `[-0.245, -0.154]`), and JPEG compression ($\Delta \text{mAP50} = -0.124$ at quality 50, 95% CI `[-0.154, -0.086]`). All paired bootstrap confidence intervals are strictly away from zero.
+  - The model degrades under Gaussian blur (delta mAP50 = -0.236 at sigma 1.0, 95% CI `[-0.274, -0.195]`), additive noise (delta mAP50 = -0.203 at sigma 0.02, 95% CI `[-0.245, -0.154]`), and JPEG compression (delta mAP50 = -0.124 at quality 50, 95% CI `[-0.154, -0.086]`). All paired bootstrap confidence intervals are strictly away from zero.
 - **Robust to Brightness**:
-  - The detector is robust to overall illumination shifts ($0.6\times$ to $1.4\times$ brightness), with mAP50 deltas of only $-0.003$ to $-0.014$, all with confidence intervals crossing zero.
+  - The detector is robust to overall illumination shifts (0.6x to 1.4x brightness), with mAP50 deltas of only -0.003 to -0.014, all with confidence intervals crossing zero.
 - **Contrast Shifts & Threshold Instability**:
-  - At contrast 1.4, mAP50 drop is small ($-0.025$, 95% CI `[-0.041, -0.008]`), but operational alerts increase by **+0.4 alerts per image** (3.38 vs 2.99 clean, $\Delta = +0.389$, 95% CI `[+0.264, +0.514]`) with no recall gain ($0.794$ vs $0.782$, $\Delta = +0.012$, 95% CI `[-0.009, 0.033]`, crossing zero).
+  - At contrast 1.4, mAP50 drop is small (-0.025, 95% CI `[-0.041, -0.008]`), but operational alerts increase by **+0.4 alerts per image** (3.38 vs 2.99 clean, delta = +0.389, 95% CI `[+0.264, +0.514]`) with no recall gain (0.794 vs 0.782, delta = +0.012, 95% CI `[-0.009, 0.033]`, crossing zero).
   - The mAP50 drop is small but recall and alerts move, which suggests confidences crossing the fixed threshold and not worse ranking. A fixed threshold is not stable under these shifts.
 
 ### 3. Matching IoU Sensitivity (Exploratory, Val Only)
 
 - When the matching threshold is lowered from IoU 0.5 to IoU 0.3 on validation, matched flat recall rises from **0.780** (`[0.739, 0.820]`) to **0.883** (`[0.851, 0.914]`).
-- The optimal flat threshold barely moves (**0.127** at IoU 0.5 vs **0.128** at IoU 0.3) because the alert budget ($B \le 3$ alerts/image) sets it.
+- The optimal flat threshold barely moves (**0.127** at IoU 0.5 vs **0.128** at IoU 0.3) because the alert budget (B <= 3 alerts/image) sets it.
 - The shipped policy and Phase 3 test results are unchanged.
 
 ---
@@ -352,23 +354,23 @@ Phase 6 implements an end-to-end telemetry and monitoring pipeline for line-side
 ### 3. Empirical Findings: Telemetry Under Drift
 Replaying 300 validation images (150 clean followed by 150 drifted across blur, Gaussian noise, and contrast) revealed clear telemetry patterns:
 - **Sharpness Collapse Under Blur**:
-  - Clean validation images exhibit high baseline sharpness ($\approx 880$ variance of Laplacian). Gaussian blur causes sharpness to plummet to $7.7$ (a $>99\%$ drop), providing an immediate, unambiguous camera defocus or smudge indicator.
+  - Clean validation images exhibit high baseline sharpness (about 880 variance of Laplacian). Gaussian blur causes sharpness to plummet to 7.7 (a > 99% drop), providing an immediate, unambiguous camera defocus or smudge indicator.
 - **Noise Estimate Spikes**:
-  - Clean hot-rolled steel grain produces a high baseline noise estimate ($\text{noise\_est} \approx 22.7$, scaled median absolute deviation of Laplacian). Sensor noise sharply elevates this estimate to $60.0$ ($+164\%$).
-  - Notably, sensor noise also inflates measured sharpness ($\approx 4,265$) because the Laplacian variance responds to high-frequency pixel artifacts as edge energy.
+  - Clean hot-rolled steel grain produces a high baseline noise estimate (noise_est ~22.7, scaled median absolute deviation of Laplacian). Sensor noise sharply elevates this estimate to 60.0 (+164%).
+  - Notably, sensor noise also inflates measured sharpness (about 4,265) because the Laplacian variance responds to high-frequency pixel artifacts as edge energy.
 - **Contrast Shifts**:
-  - Contrast perturbations shift `contrast_std` in a level-dependent manner (mean $32.1$ vs $28.8$ clean).
+  - Contrast perturbations shift `contrast_std` in a level-dependent manner (mean 32.1 vs 28.8 clean).
 - **Max Confidence Misses Contrast Drift**:
-  - While mean maximum confidence drops noticeably under severe blur ($0.707 \rightarrow 0.570$) and noise ($0.707 \rightarrow 0.626$), it fails to detect contrast drift ($0.723$ vs $0.707$ clean).
+  - While mean maximum confidence drops noticeably under severe blur (0.707 to 0.570) and noise (0.707 to 0.626), it fails to detect contrast drift (0.723 vs 0.707 clean).
   - This demonstrates that **output-confidence monitoring alone is blind to lighting/contrast shifts**, underscoring the necessity of tracking raw input image statistics alongside model predictions.
 
 ### 4. Honest Limitations & Design Boundaries
 - **Simulated Stream & Injected Drift**:
   - All streaming data and perturbations are generated synthetically by the simulator (`simulated = TRUE`). Detecting these shifts confirms that the logging pipeline and statistical metrics function correctly, not that real-world steel mill environmental drift is automatically detected.
 - **Class Skew & Roll-up Heuristic**:
-  - The NEU-DET dataset consists exclusively of defective steel coupons (no defect-free benign production images). Consequently, $\approx 78\text{--}80\%$ of inspected images produce a rolled-up decision of `stop_now`. The per-image roll-up heuristic ("most urgent action wins") remains unevaluated against factory operational costs.
+  - The NEU-DET dataset consists exclusively of defective steel coupons (no defect-free benign production images). Consequently, about 78-80% of inspected images produce a rolled-up decision of `stop_now`. The per-image roll-up heuristic ("most urgent action wins") remains unevaluated against factory operational costs.
 - **Texture Baselines**:
-  - `noise_est` has a high clean baseline ($\approx 22.7$) due to hot-rolled steel surface textures, and Gaussian noise also elevates Laplacian sharpness.
+  - `noise_est` has a high clean baseline (~22.7) due to hot-rolled steel surface textures, and Gaussian noise also elevates Laplacian sharpness.
 - **Dashboard Accessibility**:
   - The Databricks Lakeview dashboard is hosted within the private workspace and requires workspace permissions. The committed dashboard screenshots and the local Streamlit application serve as the public, portable views.
 - **Credential Protection**:
@@ -386,23 +388,23 @@ To detect distribution shifts without ground-truth inspection labels, we monitor
 - **Model Output Signals**: `max_confidence` and `n_detections`.
 
 **Statistical Framework (`src/drift.py`)**:
-- Compares a sliding window of recent traffic ($W = 30$ events) against a fixed clean reference window ($N = 200$ events) using two-sample **Kolmogorov-Smirnov (KS) tests**.
-- **Multiple Testing Control**: Testing 6 features simultaneously inflates false alarm rates. We apply the step-down **Holm-Bonferroni correction** to bound the Family-Wise Error Rate (FWER) at target significance $\alpha = 0.001$.
+- Compares a sliding window of recent traffic (W = 30 events) against a fixed clean reference window (N = 200 events) using two-sample **Kolmogorov-Smirnov (KS) tests**.
+- **Multiple Testing Control**: Testing 6 features simultaneously inflates false alarm rates. We apply the step-down **Holm-Bonferroni correction** to bound the Family-Wise Error Rate (FWER) at target significance alpha = 0.001.
 - **Calibration & Holdout Evaluation**:
   - Detection thresholds were calibrated on a synthetic stream with seed 100 and evaluated on a separate holdout stream with seed 200.
-  - On clean simulated traffic (20 independent streams, 15,420 sliding windows evaluated), the system achieved a low false alarm rate of **0.32 episodes per 1,000 events** (per-window false alarm rate: $0.0011$; 85% of clean streams completed without any false alarm).
+  - On clean simulated traffic (20 independent streams, 15,420 sliding windows evaluated), the system achieved a low false alarm rate of **0.32 episodes per 1,000 events** (per-window false alarm rate: 0.0011; 85% of clean streams completed without any false alarm).
 - **Detection Delays & Feature Responsiveness**:
-  - **Gaussian Blur**: Detected rapidly with a median delay of 16.5 events at mild blur ($\sigma = 1.0$) and 12.0 events at moderate/severe blur ($\sigma \in \{2.0, 3.0\}$; 90th percentile delay $\le 20$ events). Sharpness and noise estimate flag on 100% of windows. At severe blur, `max_confidence` also drops and flags on 87% of windows.
-  - **Gaussian Noise**: Detected in 25.0 events (mild $\sigma = 0.02$), 14.5 events (moderate $\sigma = 0.05$), and 11.0 events (severe $\sigma = 0.10$; 90th percentile delay $\le 42.2$ events). Sharpness and noise estimate fire immediately, while confidence collapses and detection counts plummet.
-  - **Contrast Shifts**: Detected with median delays of 26.0 events (mild $0.6\times$) and 50.0 events (severe $1.4\times$), driven by `contrast_std`.
-  - **Brightness Shifts**: Detected with median delays between 18.0 and 89.0 events across levels ($0.6\times$ to $1.4\times$), driven by `brightness_mean`.
+  - **Gaussian Blur**: Detected rapidly with a median delay of 16.5 events at mild blur (sigma = 1.0) and 12.0 events at moderate/severe blur (sigma in {2.0, 3.0}; 90th percentile delay <= 20 events). Sharpness and noise estimate flag on 100% of windows. At severe blur, `max_confidence` also drops and flags on 87% of windows.
+  - **Gaussian Noise**: Detected in 25.0 events (mild sigma = 0.02), 14.5 events (moderate sigma = 0.05), and 11.0 events (severe sigma = 0.10; 90th percentile delay <= 42.2 events). Sharpness and noise estimate fire immediately, while confidence collapses and detection counts plummet.
+  - **Contrast Shifts**: Detected with median delays of 26.0 events (mild 0.6x) and 50.0 events (severe 1.4x), driven by `contrast_std`.
+  - **Brightness Shifts**: Detected with median delays between 18.0 and 89.0 events across levels (0.6x to 1.4x), driven by `brightness_mean`.
 
 ---
 
 ### 2. Two-Tier Alerting & Empirical Findings
 Alert fatigue is a critical failure mode in industrial monitoring. If every lighting flicker pages an on-call engineer, alerts get silenced. We implemented a two-tier alerting policy (`src/triggers.py`):
 - **Tier 1 (Telemetry Alert)**: Informational alert indicating input sensor drift (fires when at least one input statistic passes the Holm-adjusted KS threshold). It signals camera issues (smudge, defocus, lighting fluctuation) without claiming the model is broken.
-- **Tier 2 (Retrain Recommended)**: High-severity trigger indicating both input drift and model output degradation ($k_1 \ge 1$ input features and prediction drift occurring within a rolling buffer of $m = 10$ windows).
+- **Tier 2 (Retrain Recommended)**: High-severity trigger indicating both input drift and model output degradation (k1 >= 1 input features and prediction drift occurring within a rolling buffer of m = 10 windows).
 
 ```text
 [Input Stream] ──> [Feature Extraction] ──> [Holm KS Test]
@@ -422,13 +424,13 @@ Input Statistic Drifts?               Prediction Statistic Drifts?
 ```
 
 **Key Empirical Findings (`reports/phase7/triggers_summary.json`)**:
-1. **Brightness Drift is Harmless**: Brightness shifts ($0.6\times$ to $1.4\times$) trigger Tier 1 alerts in 99% of streams, but produce **0.0% Tier 2 triggers** across all 4 evaluated severities. Because the detector is invariant to brightness ($\Delta\text{mAP50} \le -0.014$), the two-tier filter successfully prevents false retrain alerts for benign optical shifts.
+1. **Brightness Drift is Harmless**: Brightness shifts (0.6x to 1.4x) trigger Tier 1 alerts in 99% of streams, but produce **0.0% Tier 2 triggers** across all 4 evaluated severities. Because the detector is invariant to brightness (delta mAP50 <= -0.014), the two-tier filter successfully prevents false retrain alerts for benign optical shifts.
 2. **Limits of Label-Free Degradation Detection**:
-   - Mild blur ($\sigma = 1.0$) causes a large drop of **$-0.236$ mAP50**, yet triggers Tier 2 on **0.0% of streams** because confidence scores and detection counts do not shift enough to cross the Holm threshold.
-   - Moderate blur ($\sigma = 2.0$) drops mAP50 by **$-0.432$**, but triggers Tier 2 on only 50% of streams (median delay: 117 events).
-   - Contrast variations drop mAP50 mildly ($-0.043$ and $-0.025$) and trigger Tier 2 on only 30% and 13% of streams.
+   - Mild blur (sigma = 1.0) causes a large drop of **-0.236 mAP50**, yet triggers Tier 2 on **0.0% of streams** because confidence scores and detection counts do not shift enough to cross the Holm threshold.
+   - Moderate blur (sigma = 2.0) drops mAP50 by **-0.432**, but triggers Tier 2 on only 50% of streams (median delay: 117 events).
+   - Contrast variations drop mAP50 mildly (-0.043 and -0.025) and trigger Tier 2 on only 30% and 13% of streams.
    - **Conclusion**: Label-free prediction signals cannot reliably detect all model accuracy drops. However, **Tier 1 input alerts caught 100% of these corrupted streams**, demonstrating that monitoring raw sensor telemetry is essential when ground-truth labels are absent.
-3. **Multi-Feature Sensitivity Analysis**: An exploratory post-hoc check requiring at least 2 input features to flag ($k_1 = 2$) eliminated clean false alarms entirely (0.0 episodes/1,000 events) and reduced brightness alerts to 47%, but increased detection delays across all conditions. This is reported as an exploratory sensitivity analysis, not a production re-tuning.
+3. **Multi-Feature Sensitivity Analysis**: An exploratory post-hoc check requiring at least 2 input features to flag (k1 = 2) eliminated clean false alarms entirely (0.0 episodes/1,000 events) and reduced brightness alerts to 47%, but increased detection delays across all conditions. This is reported as an exploratory sensitivity analysis, not a production re-tuning.
 
 ---
 
@@ -436,14 +438,14 @@ Input Statistic Drifts?               Prediction Statistic Drifts?
 To prevent deploying worse or regressed models, candidate checkpoints are evaluated by an automated promotion gate (`src/promotion.py` using `configs/promotion.yaml`) before deployment.
 
 **Pre-Registered Promotion Rules**:
-1. **Minimum Overall Gain**: Must improve validation $\text{mAP50}$ by at least $+0.0100$ ($+1.0$ percentage point).
-2. **Maximum Per-Class Regression**: No individual defect class may drop by more than $0.0500$ ($5.0$ percentage points in $\text{AP50}$).
-3. **Paired Bootstrap Confidence Interval**: The 95% paired bootstrap confidence interval for $\Delta\text{mAP50}$ must strictly exclude zero.
+1. **Minimum Overall Gain**: Must improve validation mAP50 by at least +0.0100 (+1.0 percentage point).
+2. **Maximum Per-Class Regression**: No individual defect class may drop by more than 0.0500 (5.0 percentage points in AP50).
+3. **Paired Bootstrap Confidence Interval**: The 95% paired bootstrap confidence interval for delta mAP50 must strictly exclude zero.
 
 **Evaluation on Phase 2b Candidates against Baseline E0 (`reports/phase7/promotion_demo.json`)**:
-- **E1 (Lower Resolution, `imgsz=320`)**: **REJECTED**. Overall $\text{mAP50}$ gain was only $+0.0033$, falling short of the required $+0.0100$ threshold.
-- **E2 (Larger Backbone, `yolov8m-640`)**: **REJECTED**. Overall $\text{mAP50}$ dropped by $-0.0141$, and `crazing` $\text{AP50}$ collapsed by $0.0927$ (violating the $0.05$ class degradation limit).
-- **E3 (Aggressive Augmentation)**: **REJECTED**. Overall $\text{mAP50}$ dropped by $-0.0284$, with `crazing` dropping by $0.0792$ and `scratches` dropping by $0.0552$.
+- **E1 (Lower Resolution, `imgsz=320`)**: **REJECTED**. Overall mAP50 gain was only +0.0033, falling short of the required +0.0100 threshold.
+- **E2 (Larger Backbone, `yolov8m-640`)**: **REJECTED**. Overall mAP50 dropped by -0.0141, and `crazing` AP50 collapsed by 0.0927 (violating the 0.05 class degradation limit).
+- **E3 (Aggressive Augmentation)**: **REJECTED**. Overall mAP50 dropped by -0.0284, with `crazing` dropping by 0.0792 and `scratches` dropping by 0.0552.
 - *Caveat*: The paired bootstrap CI rule could not be evaluated because Phase 2b runs only stored aggregated validation metrics, not per-image detection arrays.
 
 ---
@@ -452,11 +454,11 @@ To prevent deploying worse or regressed models, candidate checkpoints are evalua
 For lightweight, production-grade serving without PyTorch dependencies, the model was exported to ONNX format (`models/best.onnx`, opset 17, dynamic batch size, fixed 640×640 input) and wrapped with letterbox preprocessing in `src/onnx_detector.py`.
 
 **Validation Split Parity Audit (`reports/phase7/onnx_parity.json`)**:
-We evaluated all 216 validation-split images across three operating confidence cutoffs ($0.001$, $0.127$, and $0.250$):
+We evaluated all 216 validation-split images across three operating confidence cutoffs (0.001, 0.127, and 0.250):
 - **Detection Count Parity**: Exactly 216 / 216 images had identical detection counts between PyTorch and ONNX (5,411 detections at conf 0.001; 645 at 0.127; 490 at 0.250). Zero unmatched detections.
-- **Bounding Box IoU**: The minimum bounding-box IoU across all matched detections was **0.99999** ($0.999988$ at conf 0.001; median IoU $> 0.999999$).
-- **Confidence Discrepancy**: The maximum absolute confidence difference across all detections was **$6.14 \times 10^{-6}$** ($\le 6 \times 10^{-6}$; median difference $\approx 3.0 \times 10^{-8}$).
-- **Inference Speed**: On CPU, ONNX Runtime reduced median per-image latency from $374.4\text{ ms}$ (PyTorch) to $308.5\text{ ms}$ (ONNX), roughly a 17–20% speedup.
+- **Bounding Box IoU**: The minimum bounding-box IoU across all matched detections was **0.99999** (0.999988 at conf 0.001; median IoU > 0.999999).
+- **Confidence Discrepancy**: The maximum absolute confidence difference across all detections was **6.14e-6** (<= 6e-6; median difference ~3.0e-8).
+- **Inference Speed**: On CPU, ONNX Runtime reduced median per-image latency from 374.4 ms (PyTorch) to 308.5 ms (ONNX), roughly 15 to 20% faster on CPU in a quick test on one busy machine, not a careful benchmark.
 - *Scope Note*: Parity was verified on square 200×200 validation images; non-square aspect ratios rely on letterbox padding.
 
 ---
@@ -546,7 +548,7 @@ defect-inspection/
 │   ├── requirements.txt       # Pinned lightweight requirements (no torch/ultralytics)
 │   └── README.md              # Demo documentation and NEU-DET data attribution
 ├── tests/                     # Automated test suite (357 tests)
-├── Dockerfile                 # Distroless, non-root container definition
+├── Dockerfile                 # Slim, non-root container definition (python:3.13-slim)
 ├── MODEL_CARD.md              # Model card with specifications, metrics, and limitations
 ├── requirements.txt           # Production API requirements
 ├── requirements-dev.txt       # Development and testing requirements

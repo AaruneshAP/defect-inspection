@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -161,4 +162,25 @@ def analyze(image: Optional[Image.Image], show_ignored: bool, service: Inspectio
     if not show_ignored:
         result = result.model_copy(update={"detections": [d for d in result.detections if d.action != "ignore"]})
     return annotate(im, result), rows_for(result), summary_text(result, show_ignored)
+
+
+def check_image_compatibility(image: Image.Image) -> Optional[str]:
+    """Soft warning heuristic: returns a message if the image is color or much larger than 200x200."""
+    reasons = []
+    w, h = image.size
+    if max(w, h) > 400:
+        reasons.append(f"much larger than the 200×200 training size ({w}×{h})")
+    if image.mode in ("RGB", "RGBA"):
+        arr = np.array(image.convert("RGB"))
+        r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+        if int(np.max(np.abs(r.astype(int) - g.astype(int)))) > 5 or int(np.max(np.abs(r.astype(int) - b.astype(int)))) > 5:
+            reasons.append("a color image (model was trained on grayscale only)")
+    if reasons:
+        return (
+            f"Heuristic warning: This image is {' and '.join(reasons)}. "
+            "The model only works on NEU-DET-style grayscale close-ups of hot-rolled steel surfaces "
+            "(about 200×200); other photos give meaningless results."
+        )
+    return None
+
 

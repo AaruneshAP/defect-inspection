@@ -159,6 +159,41 @@ def test_banners_state_demo_and_simulated_data():
     assert "SIMULATED" in core.SIM_BANNER
 
 
+def test_check_image_compatibility_clean_grayscale_passes():
+    gray_l = Image.fromarray(np.full((200, 200), 128, dtype=np.uint8))
+    assert core.check_image_compatibility(gray_l) is None
+
+    gray_rgb = Image.fromarray(np.full((200, 200, 3), 128, dtype=np.uint8))
+    assert core.check_image_compatibility(gray_rgb) is None
+
+
+def test_check_image_compatibility_warns_on_color():
+    color_arr = np.zeros((200, 200, 3), dtype=np.uint8)
+    color_arr[..., 0] = 200
+    color_img = Image.fromarray(color_arr)
+    warn = core.check_image_compatibility(color_img)
+    assert warn is not None
+    assert "color image" in warn
+    assert "much larger" not in warn
+
+
+def test_check_image_compatibility_warns_on_large_dimensions():
+    large_gray = Image.fromarray(np.full((600, 800), 128, dtype=np.uint8))
+    warn = core.check_image_compatibility(large_gray)
+    assert warn is not None
+    assert "much larger than the 200×200 training size (800×600)" in warn
+    assert "color image" not in warn
+
+
+def test_check_image_compatibility_warns_on_both_large_and_color():
+    both_arr = np.zeros((768, 1024, 3), dtype=np.uint8)
+    both_arr[..., 1] = 180
+    both_img = Image.fromarray(both_arr)
+    warn = core.check_image_compatibility(both_img)
+    assert warn is not None
+    assert "much larger" in warn and "color image" in warn
+
+
 def test_requirements_are_light_and_pinned():
     lines = [ln for ln in Path("streamlit_app/requirements.txt").read_text().splitlines()
              if ln.strip() and not ln.startswith("#")]

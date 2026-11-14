@@ -20,6 +20,8 @@ def load():
 
 st.error(core.BANNER, icon="ℹ️")
 st.title("Steel surface defect inspection")
+st.caption("The model only works on NEU-DET-style grayscale close-ups of hot-rolled steel surfaces (about 200×200); "
+           "other photos give meaningless results.")
 assets, service = load()
 if service is None:
     st.error(assets.error)
@@ -46,6 +48,9 @@ with col_in:
             st.error("That file could not be read as an image.")
             image = None
     if image is not None:
+        warning = core.check_image_compatibility(image)
+        if warning:
+            st.warning(warning, icon="⚠️")
         st.image(image, caption="Input", width="stretch")
 
 with col_out:
